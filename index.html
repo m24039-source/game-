@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>数理変換タクティクス (PvP・完全プライベート版)</title>
+    <title>数理変換タクティクス (PvP・マッチング完全修正版)</title>
     <style>
         :root {
             --primary: #2563eb;
@@ -42,7 +42,6 @@
             color: #0f172a;
         }
 
-        /* 陣営選択画面 */
         .setup-panel {
             background: #f1f5f9;
             padding: 15px;
@@ -68,7 +67,6 @@
             cursor: not-allowed;
         }
 
-        /* 対戦ボード */
         .pvp-board {
             display: grid;
             grid-template-columns: 1fr;
@@ -223,7 +221,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+        import { getDatabase, ref, set, onValue, update, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
         const firebaseConfig = {
             databaseURL: "https://math-tactics-default-rtdb.firebaseio.com" 
@@ -232,10 +230,8 @@
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
 
-        // 🌟 【最重要修正】URLのハッシュを使って、あなただけの固有の部屋を作成
         let roomId = window.location.hash.substring(1);
         if (!roomId) {
-            // ルームIDがない（最初のアクセス）なら、ランダムなIDを作ってURLを更新
             roomId = "room_" + Math.random().toString(36).substring(2, 11);
             window.location.hash = roomId;
         }
@@ -251,7 +247,7 @@
             currentTurnRole: "host", 
             hostOnline: false,
             guestOnline: false,
-            log: "【システム】専用対戦部屋が作成されました。\n"
+            log: "【システム】専用対戦部屋が同期されました。\n"
         };
 
         let gameState = {};
@@ -264,10 +260,9 @@
             return Object.values(data);
         }
 
-        // 招待用URLを表示する
         document.getElementById('invite-url').innerText = window.location.href;
 
-        // 部屋のデータ監視
+        // リアルタイム同期
         onValue(roomRef, (snapshot) => {
             const data = snapshot.val();
             if (data) {
@@ -275,9 +270,9 @@
                 gameState.hostHand = safeArray(data.hostHand);
                 gameState.guestHand = safeArray(data.guestHand);
 
-                // 🌟 これで「両方で先手」を選べなくなります（リアルタイムにロック）
-                document.getElementById('btn-join-host').disabled = (data.hostOnline && myRole !== 'host');
-                document.getElementById('btn-join-guest').disabled = (data.guestOnline && myRole !== 'guest');
+                // 陣営選択画面のボタン制御（入室済みのロールは絶対に押せなくする）
+                document.getElementById('btn-join-host').disabled = !!data.hostOnline;
+                document.getElementById('btn-join-guest').disabled = !!data.guestOnline;
                 
                 if (myRole) {
                     updateDOM();
@@ -288,17 +283,32 @@
             }
         });
 
-        // ロール選択
+        // 🌟【超重要】重複入室を絶対に防ぐ厳格なチェック付き入室関数
         window.selectRole = async function(role) {
+            // ボタンを押した瞬間、データベースの最新状態を直接強制取得
+            const snapshot = await get(roomRef);
+            const currentData = snapshot.val() || {};
+
+            if (role === 'host' && currentData.hostOnline) {
+                alert("タッチの差でプレイヤー1(先攻)が埋まりました！もう一方をお選びください。");
+                return;
+            }
+            if (role === 'guest' && currentData.guestOnline) {
+                alert("タッチの差でプレイヤー2(後攻)が埋まりました！もう一方をお選びください。");
+                return;
+            }
+
             myRole = role;
             document.getElementById('setup-screen').style.display = 'none';
             document.getElementById('game-screen').style.display = 'block';
 
             let updates = {};
             if (role === 'host') {
-                updates = { ...initialGameState, hostOnline: true, guestOnline: gameState.guestOnline || false };
-                await set(roomRef, updates); // ホスト入室時は真っさらに
+                // ホストが最初の入室者の場合、部屋を初期化して自分がオンラインに
+                updates = { ...initialGameState, hostOnline: true, guestOnline: currentData.guestOnline || false };
+                await set(roomRef, updates);
             } else {
+                // ゲストが入室した場合、既存のデータを壊さずに自分がオンラインに
                 updates['/guestOnline'] = true;
                 await update(roomRef, updates);
             }
@@ -321,16 +331,18 @@
             const isMyTurn = (gameState.currentTurnRole === myRole);
             const turnInfo = document.getElementById('turn-info');
             
+            // 自分の役割を分かりやすく明記
+            const roleLabel = myRole === 'host' ? '【あなた: プレイヤー1 (先攻)】' : '【あなた: プレイヤー2 (後攻)】';
+
             if (isMyTurn) {
-                turnInfo.innerText = `★ あなたのターンです (ターン: ${gameState.turn})`;
+                turnInfo.innerText = `★ ${roleLabel} あなたのターンです (ターン: ${gameState.turn})`;
                 turnInfo.style.color = "var(--primary)";
             } else {
                 const partnerName = gameState.currentTurnRole === 'host' ? 'プレイヤー1 (先攻)' : 'プレイヤー2 (後攻)';
-                turnInfo.innerText = `現在、[${partnerName}] のターンです。待機中...`;
+                turnInfo.innerText = `${roleLabel} 現在、[${partnerName}] のターンです。待機中...`;
                 turnInfo.style.color = "#64748b";
             }
 
-            // 🌟 自分のターンだけボタンが押せるようになる制御
             const buttons = document.querySelectorAll('.actions-grid button');
             buttons.forEach(btn => { btn.disabled = !isMyTurn; });
 
@@ -533,7 +545,7 @@
 <body>
 
 <div class="game-container">
-    <h1>数理変換タクティクス (プライベートPvP版)</h1>
+    <h1>数理変換タクティクス (完全修正PvP版)</h1>
 
     <div id="setup-screen" class="setup-panel">
         <div class="url-box">
@@ -544,7 +556,7 @@
         <p style="font-weight: bold; margin-bottom: 10px;">どちらのプレイヤーとして参加しますか？</p>
         <button id="btn-join-host" class="btn-role" style="background:#ef4444;" onclick="selectRole('host')">プレイヤー1 (先攻) として入室</button>
         <button id="btn-join-guest" class="btn-role" style="background:#f59e0b;" onclick="selectRole('guest')">プレイヤー2 (後攻) として入室</button>
-        <p style="font-size: 11px; color:#64748b; margin-top: 10px;">※他のプレイヤーが入室すると、そのボタンは自動的にグレーアウトします。</p>
+        <p style="font-size: 11px; color:#64748b; margin-top: 10px;">※すでに誰かが席に座っている場合、タッチの差で入室をブロックする安全装置がついています。</p>
     </div>
 
     <div id="game-screen" style="display: none;">
@@ -559,39 +571,4 @@
             </div>
             
             <div id="panel-guest" class="player-status status-guest">
-                <div class="player-header">
-                    <div>👤 プレイヤー2 (後攻)</div>
-                    <div id="guest-hp" class="hp-display">HP: 100</div>
-                </div>
-                <div class="mini-card-container" id="guest-hand-display"></div>
-            </div>
-        </div>
-
-        <div id="turn-info" style="text-align: center; font-weight: bold; margin-bottom: 15px; font-size: 15px;"></div>
-
-        <div class="section-title">あなたの操作用手札 (自分のターンのみ選択可能)</div>
-        <div class="hand-container" id="hand-area"></div>
-
-        <div class="section-title">アクションコマンド</div>
-        <div class="actions-grid">
-            <button class="btn-attack" onclick="executeAttack()">⚔️ 選択したカードで相手にダイレクトアタック！</button>
-            <button class="btn-main" onclick="endTurn()">🚪 行動を終了して相手にターンを渡す</button>
-            <button class="btn-op" onclick="opAdd()">➕ 足し算 (2枚)</button>
-            <button class="btn-op" onclick="opSub()">➖ 引き算</button>
-            <button class="btn-op" onclick="opDivProduct()">操作A: 商×余</button>
-            <button class="btn-op" onclick="opDigitSumDiv()">操作B: 桁和</button>
-            
-            <button class="btn-op" style="grid-column: span 2; background: #faf5ff; border: 1px solid #d8b4fe;" onclick="opGcdMul()">
-                🔮 操作C: Xに最大公約数を掛ける
-            </button>
-        </div>
-
-        <div class="section-title">リアルタイム・バトルログ</div>
-        <div class="log-container" id="log-area"></div>
-        
-        <button onclick="resetRoom()" style="margin-top: 15px; width: 100%; background: #64748b; color: white;">🔄 試合をリセットして新しく始める</button>
-    </div>
-</div>
-
-</body>
-</html>
+                <div clas
