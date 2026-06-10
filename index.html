@@ -260,8 +260,10 @@
             return Object.values(data);
         }
 
-        document.getElementById('invite-url').innerText = window.location.href;
-
+        // DOMが読み込まれてからURLをセット
+        window.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('invite-url').innerText = window.location.href;
+        });
         // リアルタイム同期
         onValue(roomRef, (snapshot) => {
             const data = snapshot.val();
@@ -270,7 +272,6 @@
                 gameState.hostHand = safeArray(data.hostHand);
                 gameState.guestHand = safeArray(data.guestHand);
 
-                // 陣営選択画面のボタン制御（入室済みのロールは絶対に押せなくする）
                 document.getElementById('btn-join-host').disabled = !!data.hostOnline;
                 document.getElementById('btn-join-guest').disabled = !!data.guestOnline;
                 
@@ -283,9 +284,8 @@
             }
         });
 
-        // 🌟【超重要】重複入室を絶対に防ぐ厳格なチェック付き入室関数
+        // ボタンから直接呼び出せるようにグローバル(window)に登録
         window.selectRole = async function(role) {
-            // ボタンを押した瞬間、データベースの最新状態を直接強制取得
             const snapshot = await get(roomRef);
             const currentData = snapshot.val() || {};
 
@@ -304,15 +304,13 @@
 
             let updates = {};
             if (role === 'host') {
-                // ホストが最初の入室者の場合、部屋を初期化して自分がオンラインに
                 updates = { ...initialGameState, hostOnline: true, guestOnline: currentData.guestOnline || false };
                 await set(roomRef, updates);
             } else {
-                // ゲストが入室した場合、既存のデータを壊さずに自分がオンラインに
                 updates['/guestOnline'] = true;
                 await update(roomRef, updates);
             }
-        }
+        };
 
         function saveState(newState) {
             set(roomRef, newState);
@@ -331,7 +329,6 @@
             const isMyTurn = (gameState.currentTurnRole === myRole);
             const turnInfo = document.getElementById('turn-info');
             
-            // 自分の役割を分かりやすく明記
             const roleLabel = myRole === 'host' ? '【あなた: プレイヤー1 (先攻)】' : '【あなた: プレイヤー2 (後攻)】';
 
             if (isMyTurn) {
@@ -432,7 +429,7 @@
 
             selectedIndices = [];
             saveState(gameState);
-        }
+        };
 
         window.endTurn = function() {
             if (!checkMyTurn()) return;
@@ -451,7 +448,7 @@
             pushLog(`ターン終了。次のプレイヤーが [${drawn}] をドロー！`);
             selectedIndices = [];
             saveState(gameState);
-        }
+        };
 
         function getMyHandArray() {
             return (myRole === 'host') ? gameState.hostHand : gameState.guestHand;
@@ -468,7 +465,7 @@
             let res = hand[selectedIndices[0]] + hand[selectedIndices[1]];
             pushLog(`合成(＋): ${hand[selectedIndices[0]]} + ${hand[selectedIndices[1]]} = [${res}]`);
             executeReplace2to1(res);
-        }
+        };
 
         window.opSub = function() {
             if (!checkMyTurn()) return;
@@ -478,7 +475,7 @@
             if (res <= 0) return alert('0以下になる引き算はできません。');
             pushLog(`合成(－): ${hand[selectedIndices[0]]} - ${hand[selectedIndices[1]]} = [${res}]`);
             executeReplace2to1(res);
-        }
+        };
 
         window.opDivProduct = function() {
             if (!checkMyTurn()) return;
@@ -489,7 +486,7 @@
             let res = Math.floor(n1 / n2) * (n1 % n2);
             pushLog(`操作A: ${n1}÷${n2} ➡ [${res}]`);
             executeReplace2to1(res);
-        }
+        };
 
         window.opDigitSumDiv = function() {
             if (!checkMyTurn()) return;
@@ -504,7 +501,7 @@
             setMyHandArray(hand);
             selectedIndices = [];
             saveState(gameState);
-        }
+        };
 
         window.opGcdMul = function() {
             if (!checkMyTurn()) return;
@@ -522,7 +519,7 @@
             let res = X * commonGcd;
             pushLog(`操作C: [X:${X}]×GCD(${commonGcd}) ➡ [${res}]`);
             executeReplace2to1(res);
-        }
+        };
 
         function executeReplace2to1(newNum) {
             let hand = getMyHandArray();
@@ -539,7 +536,7 @@
                 await set(roomRef, null);
                 location.reload();
             }
-        }
+        };
     </script>
 </head>
 <body>
@@ -550,7 +547,7 @@
     <div id="setup-screen" class="setup-panel">
         <div class="url-box">
             📢 <b>対戦相手を招待するURL:</b><br>
-            <span id="invite-url"></span><br>
+            <span id="invite-url">ロード中...</span><br>
             <small style="color:#0284c7;">※相手と対戦するときは、上のURLをそのままコピーして相手に渡してください。</small>
         </div>
         <p style="font-weight: bold; margin-bottom: 10px;">どちらのプレイヤーとして参加しますか？</p>
@@ -571,7 +568,7 @@
             </div>
             
             <div id="panel-guest" class="player-status status-guest">
-                 <div class="player-header">
+                <div class="player-header">
                     <div>👤 プレイヤー2 (後攻)</div>
                     <div id="guest-hp" class="hp-display">HP: 100</div>
                 </div>
