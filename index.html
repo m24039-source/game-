@@ -571,4 +571,39 @@
             </div>
             
             <div id="panel-guest" class="player-status status-guest">
-                <div clas
+                 <div class="player-header">
+                    <div>👤 プレイヤー2 (後攻)</div>
+                    <div id="guest-hp" class="hp-display">HP: 100</div>
+                </div>
+                <div class="mini-card-container" id="guest-hand-display"></div>
+            </div>
+        </div>
+
+        <div id="turn-info" style="text-align: center; font-weight: bold; margin-bottom: 15px; font-size: 15px;"></div>
+
+        <div class="section-title">あなたの操作用手札 (自分のターンのみ選択可能)</div>
+        <div class="hand-container" id="hand-area"></div>
+
+        <div class="section-title">アクションコマンド</div>
+        <div class="actions-grid">
+            <button class="btn-attack" onclick="executeAttack()">⚔️ 選択したカードで相手にダイレクトアタック！</button>
+            <button class="btn-main" onclick="endTurn()">🚪 行動を終了して相手にターンを渡す</button>
+            <button class="btn-op" onclick="opAdd()">➕ 足し算 (2枚)</button>
+            <button class="btn-op" onclick="opSub()">➖ 引き算</button>
+            <button class="btn-op" onclick="opDivProduct()">操作A: 商×余</button>
+            <button class="btn-op" onclick="opDigitSumDiv()">操作B: 桁和</button>
+            
+            <button class="btn-op" style="grid-column: span 2; background: #faf5ff; border: 1px solid #d8b4fe;" onclick="opGcdMul()">
+                🔮 操作C: Xに最大公約数を掛ける
+            </button>
+        </div>
+
+        <div class="section-title">リアルタイム・バトルログ</div>
+        <div class="log-container" id="log-area"></div>
+        
+        <button onclick="resetRoom()" style="margin-top: 15px; width: 100%; background: #64748b; color: white;">🔄 試合をリセットして新しく始める</button>
+    </div>
+</div>
+
+</body>
+</html>
