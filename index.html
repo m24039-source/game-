@@ -16,6 +16,10 @@
         .status-success { background: #10b981; }
         .status-error { background: #ef4444; }
 
+        /* ⏱️ タイマー表示の専用スタイル */
+        .timer-panel { background: #fff1f2; border: 2px solid #fecdd3; padding: 10px; border-radius: 12px; text-align: center; margin-bottom: 15px; }
+        .timer-count { font-size: 28px; font-weight: bold; color: var(--danger); font-family: monospace; }
+
         .setup-panel { background: #f1f5f9; padding: 15px; border-radius: 12px; margin-bottom: 15px; }
         .setting-group { display: flex; flex-direction: column; gap: 8px; text-align: left; margin-bottom: 15px; background: white; padding: 12px; border-radius: 8px; border: 1px solid var(--border); }
         .setting-item { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
@@ -36,17 +40,14 @@
         .card { background: white; border: 2px solid var(--primary); color: var(--primary); padding: 8px 14px; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; user-select: none; transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         .card.selected { background: var(--primary); color: white; box-shadow: 0 0 10px rgba(37,99,235,0.4); }
         
-        /* 🛠️ コマンドエリアとボタンのスタイル改善 */
         .actions-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 15px; }
         button { padding: 12px; border: none; border-radius: 8px; font-size: 13px; font-weight: bold; cursor: pointer; transition: all 0.2s; }
         
-        /* 自分のターンで有効なボタンの色をハッキリさせる */
         .btn-attack { grid-column: span 2; background: #10b981; color: white; font-size: 15px; }
         .btn-main { grid-column: span 2; background: #7c3aed; color: white; font-size: 14px; }
-        .btn-op { background: #3b82f6; color: white; } /* 演算ボタンを認識しやすい青色に変更 */
-        .btn-op-special { grid-column: span 2; background: #f472b6; color: white; } /* 操作Cをピンクに */
+        .btn-op { background: #3b82f6; color: white; }
+        .btn-op-special { grid-column: span 2; background: #f472b6; color: white; }
         
-        /* 相手のターン（無効化時）の見た目を完全に固定 */
         button:disabled { background: #cbd5e1 !important; color: #94a3b8 !important; cursor: not-allowed; box-shadow: none !important; opacity: 0.6; }
         
         .log-container { background: #1e293b; color: #f8fafc; padding: 10px; border-radius: 8px; height: 120px; overflow-y: auto; font-family: monospace; font-size: 12px; line-height: 1.5; }
@@ -91,6 +92,7 @@
         let myPlayerId = null; 
         let selectedIndices = [];
         let currentProcessedTurnIdx = -1; 
+        let timerInterval = null; // ホスト用タイマー監視ループ
 
         window.addEventListener('DOMContentLoaded', () => { 
             document.getElementById('invite-url').innerText = window.location.href; 
@@ -103,6 +105,7 @@
                 document.getElementById('waiting-screen').style.display = 'none';
                 document.getElementById('game-screen').style.display = 'none';
                 gameState = {};
+                stopHostTimer();
                 return;
             }
             
@@ -121,6 +124,7 @@
                 } else {
                     document.getElementById('btn-auto-join').style.display = 'none';
                 }
+                stopHostTimer();
             } else if (gameState.status === 'playing' || gameState.status === 'finished') {
                 document.getElementById('waiting-screen').style.display = 'none';
                 document.getElementById('game-screen').style.display = 'block';
@@ -141,6 +145,15 @@
                             triggerStartTurnDraw();
                         }
                     }
+
+                    // 🛠️ ホスト（部屋を立てたP1）だけが時間をカウントダウンする処理を開始
+                    if (myPlayerId === 'P1') {
+                        startHostTimer();
+                    }
+                }
+                
+                if (gameState.status === 'finished') {
+                    stopHostTimer();
                 }
                 updateDOM();
             }
@@ -148,15 +161,51 @@
             setDebugStatus('error', `通信拒否: ${error.message}`);
         });
 
+        // ⏱️ ホスト用カウントダウンの開始関数
+        function startHostTimer() {
+            if (timerInterval) return; // すでに動いていれば多重起動防止
+            timerInterval = setInterval(() => {
+                runTransaction(roomRef, (currentData) => {
+                    if (!currentData || currentData.status !== 'playing') return currentData;
+                    
+                    if (currentData.remainingTime === undefined) {
+                        currentData.remainingTime = currentData.config?.turnLimitTime || 30;
+                    }
+
+                    if (currentData.remainingTime > 0) {
+                        currentData.remainingTime -= 1; // 1秒減らす
+                    } else {
+                        // 🛑 0秒になったら強制交代処理を発動
+                        let activePlayerId = currentData.turnOrder[currentData.currentTurnIdx];
+                        let pName = currentData.players[activePlayerId]?.name || activePlayerId;
+                        currentData.log = (currentData.log || "") + `⏰ タイムアップ！ ${pName} の制限時間が切れました。\n`;
+                        
+                        // 次のターンへ進め、タイマーをリセット
+                        advanceTurn(currentData);
+                        currentData.remainingTime = currentData.config?.turnLimitTime || 30;
+                    }
+                    return currentData;
+                });
+            }, 1000);
+        }
+
+        function stopHostTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+        }
+
         window.createRoom = function(maxPlayers) {
             const config = {
                 initHandCount: parseInt(document.getElementById('cfg-init-hand-count').value) || 5,
                 initMaxNum: parseInt(document.getElementById('cfg-init-max-num').value) || 10,
-                drawCount: parseInt(document.getElementById('cfg-draw-count').value) || 1,
+                drawCount: parseInt(document.getElementById('cfg-draw-count').value) || 2,
                 drawMaxNum: parseInt(document.getElementById('cfg-draw-max-num').value) || 20,
                 handLimitNum: parseInt(document.getElementById('cfg-hand-limit-num').value) || 150,
                 winScore: parseInt(document.getElementById('cfg-win-score').value) || 100,
-                maxTurns: parseInt(document.getElementById('cfg-max-turns').value) || 10
+                maxTurns: parseInt(document.getElementById('cfg-max-turns').value) || 10,
+                turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30 // 制限時間（秒）
             };
 
             const initialData = {
@@ -166,6 +215,7 @@
                 absoluteTurnIdx: 0, 
                 turnOrder: [],
                 currentTurnIdx: 0,
+                remainingTime: config.turnLimitTime, // タイマー初期化
                 log: "【システム】部屋が作成されました。カスタムルールが適用されています。\n",
                 config: config,
                 players: {}
@@ -223,7 +273,7 @@
                 const activePlayerId = currentData.turnOrder[currentData.currentTurnIdx];
                 if (activePlayerId !== myPlayerId) return currentData; 
                 
-                const rule = currentData.config || { drawCount: 1, drawMaxNum: 20 };
+                const rule = currentData.config || { drawCount: 2, drawMaxNum: 20 };
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 
                 let drawnNums = [];
@@ -249,6 +299,20 @@
             const activePlayerId = gameState.turnOrder ? gameState.turnOrder[gameState.currentTurnIdx] : null;
             const isMyTurn = (activePlayerId === myPlayerId && gameState.status === 'playing');
             
+            // ⏱️ タイマー表示の更新
+            const timerBox = document.getElementById('timer-box');
+            if (timerBox) {
+                if (gameState.status === 'playing') {
+                    const time = gameState.remainingTime !== undefined ? gameState.remainingTime : '--';
+                    timerBox.innerText = `⏱️ 残り時間: ${time} 秒`;
+                    // 残り5秒以下になったら文字をさらに赤く目立たせる
+                    timerBox.style.color = time <= 5 ? '#ef4444' : '#b91c1c';
+                } else {
+                    timerBox.innerText = `⏱️ タイマー停止中`;
+                    timerBox.style.color = '#64748b';
+                }
+            }
+
             if(gameState.config) {
                 const c = gameState.config;
                 const rBox = document.getElementById('rules-summary-box');
@@ -256,7 +320,7 @@
                     rBox.innerHTML = `
                         ⚙️ <b>現在のルール:</b> 初期手札 ${c.initHandCount}枚(最大:${c.initMaxNum}) | 
                         毎ターン ${c.drawCount}枚(最大:${c.drawMaxNum}) | 
-                        <b>手札上限: ${c.handLimitNum}</b> | 勝利目標: ${c.winScore}pt | 最大: ${c.maxTurns}ターン
+                        <b>上限: ${c.handLimitNum}</b> | 目標: ${c.winScore}pt | 最大: ${c.maxTurns}周 | ⏱️制限: ${c.turnLimitTime || 30}秒
                     `;
                 }
             }
@@ -302,7 +366,6 @@
                 }
             }
 
-            // ボタンの有効・無効を確実に現在のターンに連動させるガード
             if (document.getElementById('game-screen').style.display !== 'none') {
                 document.querySelectorAll('.actions-grid button').forEach(btn => { 
                     btn.disabled = !isMyTurn; 
@@ -403,6 +466,9 @@
                     currentData.log = (currentData.log || "") + `🏆👑【決着】${attackPlayerName} が目標の ${winTarget} 点に達したため勝者となりました！\n`;
                 }
                 
+                // ⏱️ 行動成功したらタイマーをリセット
+                currentData.remainingTime = currentData.config?.turnLimitTime || 30;
+
                 return currentData;
             }).then(() => {
                 selectedIndices = [];
@@ -420,6 +486,9 @@
                 currentData.log = (currentData.log || "") + `🚪 ${pName} が行動を終了しました。\n`;
                 
                 advanceTurn(currentData);
+                // ⏱️ 次の人に回るのでタイマーを初期値にリセット
+                currentData.remainingTime = currentData.config?.turnLimitTime || 30;
+
                 return currentData;
             }).then(() => {
                 selectedIndices = [];
@@ -457,7 +526,7 @@
         }
 
         // ==========================================
-        // 🔮 数理特殊変換・合成コマンド群 (インデックスズレ完全修正版)
+        // 🔮 数理特殊変換・合成コマンド群
         // ==========================================
         window.opAdd = function() { executeOp((a, b) => a + b, "➕ 足し算"); };
         window.opSub = function() { executeOp((a, b) => a - b, "➖ 引き算", true); };
@@ -491,7 +560,6 @@
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 
-                // 正確に選んだ1枚を消去して新しい値をプッシュ
                 hand.splice(targetIdx, 1);
                 hand.push(quotient);
                 
@@ -505,6 +573,10 @@
                 
                 currentData.players[myPlayerId].hand = hand;
                 currentData.log = (currentData.log || "") + logMsg;
+                
+                // ⏱️ 行動成功したらタイマーをリセット
+                currentData.remainingTime = currentData.config?.turnLimitTime || 30;
+
                 return currentData;
             }).then(() => { 
                 selectedIndices = []; 
@@ -538,7 +610,6 @@
                 let val1 = myHand[selectedIndices[0]];
                 let val2 = myHand[selectedIndices[1]];
                 
-                // 値を基準に配列から2枚を確実に取り除く（インデックスの狂いを防止）
                 let idx1 = hand.indexOf(val1);
                 if(idx1 !== -1) hand.splice(idx1, 1);
                 let idx2 = hand.indexOf(val2);
@@ -547,6 +618,10 @@
                 hand.push(res);
                 currentData.players[myPlayerId].hand = hand;
                 currentData.log = (currentData.log || "") + `🔮 ${currentData.players[myPlayerId].name} が操作C(GCD): [${X}] と [${Y}] ➡ [${res}]\n`;
+                
+                // ⏱️ 行動成功したらタイマーをリセット
+                currentData.remainingTime = currentData.config?.turnLimitTime || 30;
+
                 return currentData;
             }).then(() => { 
                 selectedIndices = []; 
@@ -573,7 +648,6 @@
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 
-                // インデックスの狂いを完全に防止するため、選択された「実際の数値」を探して1枚ずつ綺麗に消去する処理に改善
                 let idx1 = hand.indexOf(n1);
                 if(idx1 !== -1) hand.splice(idx1, 1);
                 let idx2 = hand.indexOf(n2);
@@ -582,6 +656,10 @@
                 hand.push(res);
                 currentData.players[myPlayerId].hand = hand;
                 currentData.log = (currentData.log || "") + `🔮 ${currentData.players[myPlayerId].name} が合成(${label}): ${n1} と ${n2} ➡ [${res}]\n`;
+                
+                // ⏱️ 行動成功したらタイマーをリセット
+                currentData.remainingTime = currentData.config?.turnLimitTime || 30;
+
                 return currentData;
             }).then(() => { 
                 selectedIndices = []; 
@@ -632,6 +710,10 @@
                 <label>⑦ プレイできる最大ターン(周回)数</label>
                 <input type="number" id="cfg-max-turns" value="10" min="1" max="50">
             </div>
+            <div class="setting-item" style="background:#fff1f2; border-radius:4px; padding:4px;">
+                <label style="color:#b91c1c; font-weight:bold;">⏱️ 1ターンの制限時間（秒）</label>
+                <input type="number" id="cfg-turn-limit-time" value="30" min="5" max="300">
+            </div>
         </div>
 
         <p style="font-size:13px; font-weight:bold; color:#475569; margin-bottom:5px;">部屋の人数を選択して開始：</p>
@@ -651,6 +733,11 @@
 
     <div id="game-screen" style="display: none;">
         <div id="rules-summary-box" class="rules-summary">⚙️ ルール読み込み中...</div>
+        
+        <div class="timer-panel">
+            <div id="timer-box" class="timer-count">⏱️ 残り時間: -- 秒</div>
+        </div>
+
         <div class="section-title">全プレイヤーの状況</div>
         <div class="pvp-board" id="pvp-board"></div>
         <div id="turn-info" style="text-align: center; font-weight: bold; margin-bottom: 15px;"></div>
