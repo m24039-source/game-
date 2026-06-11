@@ -1,6 +1,6 @@
 // ==========================================
 // 数理変換タクティクス：CPU（AI）思考エンジン
-// 【GitHub Pages パス完全固定版】
+// 【最強脳みそデータ直接埋め込み・最終安定版】
 // ==========================================
 import { runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
@@ -8,18 +8,57 @@ import { runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/fireba
 let aiNeuralModel = null;
 
 /**
- * 📥 1. Colabで育てた最強の脳みそ（model.json）を絶対パスで読み込む
+ * 📥 1. 脳みその構造データを直接読み込む
  */
 export async function loadBrain() {
     try {
-        // 🚨 あなたのGitHub Pagesの絶対URLを直接指定して、404エラーを完全に回避します
-        const modelUrl = 'https://m24039-source.github.io/game-/tfjs_model/model.json';
+        // 先ほど提示していただいた正しいmodel.jsonのデータを直接変数に格納します
+        const modelJsonData = {
+            "format": "layers-model", 
+            "generatedBy": "keras v3.13.2", 
+            "convertedBy": "TensorFlow.js Converter v4.22.0", 
+            "modelTopology": {
+                "keras_version": "3.13.2", 
+                "backend": "tensorflow", 
+                "model_config": {
+                    "class_name": "Sequential", 
+                    "config": {
+                        "name": "sequential", 
+                        "trainable": true, 
+                        "layers": [
+                            {"class_name": "InputLayer", "config": {"batch_shape": [null, 30], "dtype": "float32", "sparse": false, "ragged": false, "name": "input_layer", "optional": false}}, 
+                            {"class_name": "Dense", "config": {"name": "dense", "trainable": true, "units": 64, "activation": "relu", "use_bias": true}}, 
+                            {"class_name": "Dense", "config": {"name": "dense_1", "trainable": true, "units": 32, "activation": "relu", "use_bias": true}}, 
+                            {"class_name": "Dense", "config": {"name": "dense_2", "trainable": true, "units": 3, "activation": "linear", "use_bias": true}}
+                        ], 
+                        "build_input_shape": [null, 30]
+                    }
+                }
+            }, 
+            "weightsManifest": [{
+                "paths": ["https://m24039-source.github.io/game-/tfjs_model/group1-shard1of1.bin"], 
+                "weights": [
+                    {"name": "sequential/dense/kernel", "shape": [30, 64], "dtype": "float32"}, 
+                    {"name": "sequential/dense/bias", "shape": [64], "dtype": "float32"}, 
+                    {"name": "sequential/dense_1/kernel", "shape": [64, 32], "dtype": "float32"}, 
+                    {"name": "sequential/dense_1/bias", "shape": [32], "dtype": "float32"}, 
+                    {"name": "sequential/dense_2/kernel", "shape": [32, 3], "dtype": "float32"}, 
+                    {"name": "sequential/dense_2/bias", "shape": [3], "dtype": "float32"}
+                ]
+            }]
+        };
         
-        aiNeuralModel = await tf.loadLayersModel(modelUrl);
-        console.log("🧠 [AI] Google Colabで鍛え上げた最強の脳みそを正常にロードしました！");
+        // ファイル経由ではなく、上記のデータから直接TensorFlow.jsのモデルを復元
+        aiNeuralModel = await tf.loadLayersModel(tf.io.fromMemory(
+            modelJsonData.modelTopology,
+            modelJsonData.weightsManifest
+        ));
+
+        console.log("🧠 [AI] 埋め込み脳みそのロードに成功しました！");
         return true;
     } catch (error) {
-        console.error("⚠️ [AI] モデルのロードに失敗しました:", error);
+        console.error("⚠️ [AI] 脳みその復元に失敗しました:", error);
+        alert("🚨 エラー詳細:\n" + error.message);
         return false;
     }
 }
@@ -55,10 +94,7 @@ function convertStateToVector(currentData, cpuId) {
 export function executeCPUTurn(roomRef, cpuId) {
     if (!aiNeuralModel) {
         loadBrain().then(success => {
-            if (!success) {
-                console.log("💤 AIの脳みそファイルが見つからないため、パスします。");
-                return;
-            }
+            if (!success) return;
         });
     }
 
@@ -86,7 +122,7 @@ export function executeCPUTurn(roomRef, cpuId) {
         let limit = currentData.config?.handLimitNum || 150;
         let isFirstRound = (currentData.turnCount === 1);
 
-        // --- 🧠 逆輸入した脳みそ（TensorFlow.js）による戦術推論 ---
+        // --- 🧠 逆輸入した脳みそによる戦術推論 ---
         const stateVector = convertStateToVector(currentData, cpuId);
         let predictedActionCategory = 0; 
         
@@ -185,7 +221,6 @@ export function executeCPUTurn(roomRef, cpuId) {
             currentData.log = (currentData.log || "") + `💤 AIはパスしました。\n`;
         }
 
-        // 手番交代
         advanceTurn(currentData);
         resetTurnTimerStock(currentData);
         return currentData;
