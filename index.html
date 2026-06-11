@@ -16,7 +16,13 @@
         .status-success { background: #10b981; }
         .status-error { background: #ef4444; }
 
-        .setup-panel { background: #f1f5f9; padding: 15px; border-radius: 12px; text-align: center; margin-bottom: 15px; }
+        .setup-panel { background: #f1f5f9; padding: 15px; border-radius: 12px; margin-bottom: 15px; }
+        .setting-group { display: flex; flex-direction: column; gap: 8px; text-align: left; margin-bottom: 15px; background: white; padding: 12px; border-radius: 8px; border: 1px solid var(--border); }
+        .setting-item { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+        .setting-item input { width: 80px; padding: 4px; border: 1px solid #cbd5e1; border-radius: 4px; text-align: right; }
+        
+        .rules-summary { background: #f8fafc; border: 1px solid var(--border); padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 12px; color: #475569; }
+
         .pvp-board { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 15px; }
         .player-status { padding: 12px; border-radius: 8px; border: 2px solid transparent; background: #f8fafc; border-color: var(--border); transition: all 0.3s; }
         .active-turn { box-shadow: 0 0 12px rgba(37,99,235,0.6); border-color: var(--primary) !important; background: #eff6ff; }
@@ -106,11 +112,11 @@
                 } else {
                     document.getElementById('btn-auto-join').style.display = 'none';
                 }
-            } else if (gameState.status === 'playing') {
+            } else if (gameState.status === 'playing' || gameState.status === 'finished') {
                 document.getElementById('waiting-screen').style.display = 'none';
                 document.getElementById('game-screen').style.display = 'block';
                 
-                if (myPlayerId) {
+                if (myPlayerId && gameState.status === 'playing') {
                     const activePlayerId = gameState.turnOrder[gameState.currentTurnIdx];
                     
                     if (activePlayerId === myPlayerId && gameState.absoluteTurnIdx !== currentProcessedTurnIdx) {
@@ -126,14 +132,25 @@
                             triggerStartTurnDraw();
                         }
                     }
-                    updateDOM();
                 }
+                updateDOM();
             }
         }, (error) => {
             setDebugStatus('error', `通信拒否: ${error.message}`);
         });
 
         window.createRoom = function(maxPlayers) {
+            // カスタムルール設定値の取得
+            const config = {
+                initHandCount: parseInt(document.getElementById('cfg-init-hand-count').value) || 5,
+                initMaxNum: parseInt(document.getElementById('cfg-init-max-num').value) || 10,
+                drawCount: parseInt(document.getElementById('cfg-draw-count').value) || 1,
+                drawMaxNum: parseInt(document.getElementById('cfg-draw-max-num').value) || 20,
+                handLimitNum: parseInt(document.getElementById('cfg-hand-limit-num').value) || 999,
+                winScore: parseInt(document.getElementById('cfg-win-score').value) || 100,
+                maxTurns: parseInt(document.getElementById('cfg-max-turns').value) || 10
+            };
+
             const initialData = {
                 status: 'waiting',
                 maxPlayers: maxPlayers,
@@ -141,7 +158,8 @@
                 absoluteTurnIdx: 0, 
                 turnOrder: [],
                 currentTurnIdx: 0,
-                log: "【システム】部屋が作成されました。参加を待っています。\n",
+                log: "【システム】部屋が作成されました。カスタムルールが適用されています。\n",
+                config: config,
                 players: {}
             };
             set(roomRef, initialData).then(() => {
@@ -165,9 +183,11 @@
                 const newId = "P" + (currentCount + 1);
                 myPlayerId = newId;
                 
+                // ルールに準じた初期手札の生成
+                const rule = currentData.config;
                 let randomHand = [];
-                for(let i = 0; i < 5; i++) {
-                    randomHand.push(Math.floor(Math.random() * 10) + 1);
+                for(let i = 0; i < rule.initHandCount; i++) {
+                    randomHand.push(Math.floor(Math.random() * rule.initMaxNum) + 1);
                 }
                 
                 currentData.players[newId] = {
@@ -196,12 +216,18 @@
                 const activePlayerId = currentData.turnOrder[currentData.currentTurnIdx];
                 if (activePlayerId !== myPlayerId) return currentData; 
                 
+                const rule = currentData.config;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
-                let drawn = Math.floor(Math.random() * 20) + 1; 
-                hand.push(drawn);
+                
+                let drawnNums = [];
+                for(let i = 0; i < rule.drawCount; i++) {
+                    let drawn = Math.floor(Math.random() * rule.drawMaxNum) + 1;
+                    hand.push(drawn);
+                    drawnNums.push(`[${drawn}]`);
+                }
                 
                 currentData.players[myPlayerId].hand = hand;
-                currentData.log += `📥 ターン開始ドロー: ${currentData.players[myPlayerId].name} は [${drawn}] を引きました。\n`;
+                currentData.log += `📥 ターン開始ドロー: ${currentData.players[myPlayerId].name} は ${drawnNums.join(', ')} を引きました。\n`;
                 return currentData;
             });
         }
@@ -211,49 +237,63 @@
             if(!board) return;
             board.innerHTML = '';
             
-            const activePlayerId = gameState.turnOrder[gameState.currentTurnIdx];
-            const isMyTurn = (activePlayerId === myPlayerId);
+            const activePlayerId = gameState.turnOrder ? gameState.turnOrder[gameState.currentTurnIdx] : null;
+            const isMyTurn = (activePlayerId === myPlayerId && gameState.status === 'playing');
             
-            gameState.turnOrder.forEach(pid => {
-                const p = gameState.players[pid];
-                if(!p) return;
-                const div = document.createElement('div');
-                div.className = "player-status" + (pid === activePlayerId ? ' active-turn' : '') + (pid === myPlayerId ? ' my-status' : '');
-                
-                const handArr = targetHandArray(p.hand);
-                
-                div.innerHTML = `
-                    <div class="player-header">
-                        <div>👤 ${p.name} ${pid === myPlayerId ? '(あなた)' : ''}</div>
-                        <div class="score-display">${p.score} pt</div>
-                    </div>
-                    <div class="mini-card-container">
-                        ${handArr.map(n => `<span class="mini-card">${n}</span>`).join('')}
-                    </div>
+            // ルール情報の表示サマリー更新
+            if(gameState.config) {
+                const c = gameState.config;
+                document.getElementById('rules-summary-box').innerHTML = `
+                    ⚙️ <b>現在のルール:</b> 初期手札 ${c.initHandCount}枚(最大値:${c.initMaxNum}) | 
+                    毎ターン ${c.drawCount}枚(最大値:${c.drawMaxNum}) | 
+                    <b>手札上限値: ${c.handLimitNum}</b> | 勝利目標: ${c.winScore}pt | 最大周回: ${c.maxTurns}ターン
                 `;
-                board.appendChild(div);
-            });
+            }
+
+            if(gameState.turnOrder) {
+                gameState.turnOrder.forEach(pid => {
+                    const p = gameState.players[pid];
+                    if(!p) return;
+                    const div = document.createElement('div');
+                    div.className = "player-status" + (pid === activePlayerId && gameState.status === 'playing' ? ' active-turn' : '') + (pid === myPlayerId ? ' my-status' : '');
+                    
+                    const handArr = targetHandArray(p.hand);
+                    
+                    div.innerHTML = `
+                        <div class="player-header">
+                            <div>👤 ${p.name} ${pid === myPlayerId ? '(あなた)' : ''}</div>
+                            <div class="score-display">${p.score} pt</div>
+                        </div>
+                        <div class="mini-card-container">
+                            ${handArr.map(n => `<span class="mini-card">${n}</span>`).join('')}
+                        </div>
+                    `;
+                    board.appendChild(div);
+                });
+            }
 
             const turnInfo = document.getElementById('turn-info');
             if (turnInfo) {
-                if (isMyTurn) {
+                if (gameState.status === 'finished') {
+                    turnInfo.innerHTML = `<span style="color:var(--danger); font-size:18px;">👑 ゲーム終了！決着がつきました 👑</span>`;
+                } else if (isMyTurn) {
                     if (gameState.turnCount === 1) {
                         turnInfo.innerText = `★ あなたの番です (1周目: 🛑現在攻撃禁止期間)`;
                         turnInfo.style.color = "#f59e0b";
                     } else {
-                        turnInfo.innerText = `★ あなたの番です (周回数: ${gameState.turnCount}ターン目)`;
+                        turnInfo.innerText = `★ あなたの番です (周回数: ${gameState.turnCount} / ${gameState.config?.maxTurns} ターン目)`;
                         turnInfo.style.color = "var(--primary)";
                     }
-                } else {
+                } else if (activePlayerId) {
                     const activeName = gameState.players[activePlayerId]?.name || activePlayerId;
-                    turnInfo.innerText = `${activeName} の番です。待機中...`;
+                    turnInfo.innerText = `${activeName} の番です (周回数: ${gameState.turnCount} / ${gameState.config?.maxTurns})。待機中...`;
                     turnInfo.style.color = "#64748b";
                 }
             }
 
             document.querySelectorAll('.actions-grid button').forEach(btn => { btn.disabled = !isMyTurn; });
 
-            const myHandArr = gameState.players[myPlayerId] ? targetHandArray(gameState.players[myPlayerId].hand) : [];
+            const myHandArr = gameState.players && gameState.players[myPlayerId] ? targetHandArray(gameState.players[myPlayerId].hand) : [];
             const handArea = document.getElementById('hand-area'); 
             if(handArea) {
                 handArea.innerHTML = '';
@@ -283,6 +323,16 @@
                 logArea.innerText = gameState.log; 
                 logArea.scrollTop = logArea.scrollHeight;
             }
+        }
+
+        // 上限値チェック関数
+        function checkNumberLimit(resultValue) {
+            const limit = gameState.config?.handLimitNum || 999;
+            if (resultValue > limit) {
+                alert(`【演算エラー】計算結果が制限値 [${limit}] を超えるため変換できません！`);
+                return false;
+            }
+            return true;
         }
 
         window.executeAttack = function() {
@@ -325,8 +375,15 @@
                 let updatedMyHand = targetHandArray(currentData.players[myPlayerId].hand);
                 updatedMyHand.splice(myIdx, 1);
                 currentData.players[myPlayerId].hand = updatedMyHand;
+                
+                // 得点加算と勝利点チェック
                 currentData.players[myPlayerId].score += totalGainedPoints;
-                currentData.log += `⚔️ ${attackPlayerName} が [${attackNum}] で攻撃！ 計 ${totalGainedPoints} 点獲得！(ターンは継続します)\n`;
+                currentData.log += `⚔️ ${attackPlayerName} が [${attackNum}] で攻撃！ 計 ${totalGainedPoints} 点獲得！\n`;
+                
+                if (currentData.players[myPlayerId].score >= currentData.config.winScore) {
+                    currentData.status = 'finished';
+                    currentData.log += `🏆👑【決着】${attackPlayerName} が目標の ${currentData.config.winScore} 点に達したため勝者となりました！\n`;
+                }
                 
                 return currentData;
             }).then(() => {
@@ -341,7 +398,7 @@
                 let activePlayerId = currentData.turnOrder[currentData.currentTurnIdx];
                 let pName = currentData.players[activePlayerId].name;
                 
-                currentData.log += `🚪 ${pName} が行動を終了しました。（次のプレイヤーへ）\n`;
+                currentData.log += `🚪 ${pName} が行動を終了しました。\n`;
                 
                 advanceTurn(currentData);
                 return currentData;
@@ -356,6 +413,22 @@
             currentData.absoluteTurnIdx++; 
             if (currentData.currentTurnIdx === 0) {
                 currentData.turnCount++;
+                // 最大周回数（最大ターン）を超えた場合はゲーム終了
+                if (currentData.turnCount > currentData.config.maxTurns) {
+                    currentData.status = 'finished';
+                    currentData.log += `🏁【制限ターン終了】規定の周回数（${currentData.config.maxTurns}ターン）を消化したためゲームを終了します。\n`;
+                    
+                    // 勝者判定ロジック
+                    let highestScore = -1;
+                    let winnerName = "";
+                    Object.values(currentData.players).forEach(p => {
+                        if (p.score > highestScore) {
+                            highestScore = p.score;
+                            winnerName = p.name;
+                        }
+                    });
+                    currentData.log += `🏆 最終勝者は ${winnerName} (${highestScore} pt) です！おめでとうございます！\n`;
+                }
             }
         }
         
@@ -378,7 +451,7 @@
             }, "操作A: 商×余", false, true);
         };
 
-        // 🔢 操作B: 桁和（完全分裂仕様・インデックスバグ排除版）
+        // 🔢 操作B: 桁和
         window.opDigitSumDiv = function() {
             let myHand = gameState.players[myPlayerId] ? targetHandArray(gameState.players[myPlayerId].hand) : [];
             if (selectedIndices.length !== 1) return alert('手札を1枚選んでください');
@@ -392,23 +465,22 @@
             let quotient = Math.floor(num / sum);
             let remainder = num % sum;
             
+            // 独立追加前に、手札制限を超えないかチェック（商も余りも個別チェック）
+            if (!checkNumberLimit(quotient) || !checkNumberLimit(remainder)) return;
+            
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 
-                // 元の数値を削除
                 hand.splice(targetIdx, 1);
-                
-                // 商を独立したカードとして追加
                 hand.push(quotient);
                 
                 let logMsg = "";
-                // 余りが0より大きい場合のみ、余りも独立した別のカードとして追加
                 if (remainder > 0) {
                     hand.push(remainder);
-                    logMsg = `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] を桁和(${sum})で分解 ➡ [${quotient}] と [${remainder}] の2枚に分裂しました！\n`;
+                    logMsg = `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] ➡ [${quotient}] と [${remainder}] の2枚に分裂！\n`;
                 } else {
-                    logMsg = `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] を桁和(${sum})で分解 ➡ 余りがないため [${quotient}] に変換されました。\n`;
+                    logMsg = `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] ➡ 余りなしのため [${quotient}] に変換。\n`;
                 }
                 
                 currentData.players[myPlayerId].hand = hand;
@@ -435,15 +507,15 @@
             if (gcd === 1) return alert('2枚の最大公約数が 1 のため操作Cは使えません');
             
             let res = X * gcd;
+            if (!checkNumberLimit(res)) return; // 制限チェック
             
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 
                 let firstIdx = Math.min(selectedIndices[0], selectedIndices[1]);
-                let secondIdx = Math.max(selectedIndices[0], selectedIndices[1]);
+                let secondIdx = Math.max(selectedIndices[0], secondIndices[1]);
                 
-                // インデックスのズレを防ぐため後ろから削除
                 hand.splice(secondIdx, 1);
                 hand.splice(firstIdx, 1);
                 
@@ -462,7 +534,7 @@
             if (selectedIndices.length !== 2) return alert('手札を2枚選んでください');
             
             let firstIdx = Math.min(selectedIndices[0], selectedIndices[1]);
-            let secondIdx = Math.max(selectedIndices[0], selectedIndices[1]);
+            let secondIdx = Math.max(selectedIndices[0], secondIndices[1]);
             
             let n1 = myHand[selectedIndices[0]];
             let n2 = myHand[selectedIndices[1]];
@@ -471,11 +543,12 @@
             if (isDivProd && res === -1) return alert('0で割ることはできません。');
             if (checkSub && res <= 0) return alert('0以下になる引き算はできません');
             
+            if (!checkNumberLimit(res)) return; // 制限チェック
+            
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 
-                // インデックスのズレを防ぐため、必ず大きいインデックス（後ろ）から削除
                 hand.splice(secondIdx, 1);
                 hand.splice(firstIdx, 1);
                 
@@ -502,7 +575,39 @@
     </div>
     
     <div id="room-setup" class="setup-panel" style="display:none;">
-        <p>何人部屋を作成しますか？</p>
+        <h3 style="margin-top:0; font-size:15px; color:#334155;">⚙️ カスタムルール設定</h3>
+        <div class="setting-group">
+            <div class="setting-item">
+                <label>① 配られる初期手札の枚数</label>
+                <input type="number" id="cfg-init-hand-count" value="5" min="1" max="15">
+            </div>
+            <div class="setting-item">
+                <label>② 初期手札の数の大きさ上限</label>
+                <input type="number" id="cfg-init-max-num" value="10" min="5" max="100">
+            </div>
+            <div class="setting-item">
+                <label>③ 毎ターンカードを引く枚数</label>
+                <input type="number" id="cfg-draw-count" value="1" min="0" max="5">
+            </div>
+            <div class="setting-item">
+                <label>④ 後から引く数の大きさ上限</label>
+                <input type="number" id="cfg-draw-max-num" value="20" min="5" max="200">
+            </div>
+            <div class="setting-item">
+                <label>⑤ 手札の数の大きさ制限（上限値）</label>
+                <input type="number" id="cfg-hand-limit-num" value="150" min="20" max="9999">
+            </div>
+            <div class="setting-item">
+                <label>⑥ 勝利となる目標得点数</label>
+                <input type="number" id="cfg-win-score" value="100" min="10" max="1000">
+            </div>
+            <div class="setting-item">
+                <label>⑦ プレイできる最大ターン(周回)数</label>
+                <input type="number" id="cfg-max-turns" value="10" min="1" max="50">
+            </div>
+        </div>
+
+        <p style="font-size:13px; font-weight:bold; color:#475569; margin-bottom:5px;">部屋の人数を選択して開始：</p>
         <button style="background:#2563eb; color:white; padding:10px 20px; margin:5px;" onclick="createRoom(2)">2人部屋を作る</button>
         <button style="background:#7c3aed; color:white; padding:10px 20px; margin:5px;" onclick="createRoom(3)">3人部屋を作る</button>
         <button style="background:#10b981; color:white; padding:10px 20px; margin:5px;" onclick="createRoom(4)">4人部屋を作る</button>
@@ -518,6 +623,7 @@
     </div>
 
     <div id="game-screen" style="display: none;">
+        <div id="rules-summary-box" class="rules-summary"></div>
         <div class="section-title">全プレイヤーの状況</div>
         <div class="pvp-board" id="pvp-board"></div>
         <div id="turn-info" style="text-align: center; font-weight: bold; margin-bottom: 15px;"></div>
