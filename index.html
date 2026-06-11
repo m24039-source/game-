@@ -298,7 +298,7 @@
             
             if (attackNum === 1) {
                 return alert('【ルール】「1」で攻撃することはできません（1で割れてもノーカンです）。別の数字を使ってください。');
-            }
+                }
             
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
@@ -377,17 +377,17 @@
             }, "操作A: 商×余", false, true);
         };
 
-        // ★【新仕様】操作B: 桁和 (1枚選択) ➡ 商と余りを独立した別々の数として手札に加える（分裂）
+        // 🔢 操作B: 桁和 (商と余りを掛け算せず、独立して配列に追加するようバグを修正)
         window.opDigitSumDiv = function() {
             let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
             if (selectedIndices.length !== 1) return alert('手札を1枚選んでください');
             
-            let num = myHand[selectedIndices[0]];
-            // 桁の合計を計算
-           let sum = String(num).split('').reduce((s, d) => s + parseInt(d), 0);
+            let targetIdx = selectedIndices[0];
+            let num = myHand[targetIdx];
+            
+            let sum = String(num).split('').reduce((s, d) => s + parseInt(d), 0);
             if (sum === 0) return alert('桁の和が0のため変換できません');
             
-            // 商と余りをそれぞれ独立して算出
             let quotient = Math.floor(num / sum);
             let remainder = num % sum;
             
@@ -395,14 +395,14 @@
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 
-                // 選択した元のカードを1枚取り除く
-                hand.splice(selectedIndices[0], 1);
+                // 1. 元のカードを確実に削除
+                hand.splice(targetIdx, 1);
                 
-                // 商のカードを追加
+                // 2. 商の数値を単体のカードとして追加
                 hand.push(quotient);
                 
                 let logMsg = "";
-                // 余りがある（0より大きい）場合のみ、余りのカードも独立して追加して分裂させる
+                // 3. 余りが0より大きい場合のみ、余りの数値も独立したカードとして追加
                 if (remainder > 0) {
                     hand.push(remainder);
                     logMsg = `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] を桁和(${sum})で分解 ➡ [${quotient}] と [${remainder}] の2枚に分裂しました！\n`;
