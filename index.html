@@ -294,7 +294,12 @@
                 }
             }
 
-            document.querySelectorAll('.actions-grid button').forEach(btn => { btn.disabled = !isMyTurn; });
+            // 【超重要バグ修正】ゲーム画面が表示されている時だけボタンの有効・無効化を切り替える（エラー防止ガード）
+            if (document.getElementById('game-screen').style.display !== 'none') {
+                document.querySelectorAll('.actions-grid button').forEach(btn => { 
+                    btn.disabled = !isMyTurn; 
+                });
+            }
 
             const myHandArr = gameState.players && gameState.players[myPlayerId] ? targetHandArray(gameState.players[myPlayerId].hand) : [];
             const handArea = document.getElementById('hand-area'); 
