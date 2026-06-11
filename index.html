@@ -385,7 +385,7 @@
         };
 
         window.opDigitSumDiv = function() {
-            let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
+            let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
             if (selectedIndices.length !== 1) return alert('手札を1枚選んでください');
             
             let num = myHand[selectedIndices[0]];
