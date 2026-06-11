@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>数理変換タクティクス - デバッグ完了版</title>
+    <title>数理変換タクティクス</title>
     <style>
         :root { --primary: #2563eb; --success: #10b981; --danger: #ef4444; --bg: #f8fafc; --card-bg: #ffffff; --text: #1e293b; --border: #e2e8f0; }
         body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 10px; display: flex; justify-content: center; }
@@ -64,11 +64,10 @@
             }
         }
 
-        // 接続監視
         const connectedRef = ref(db, ".info/connected");
         onValue(connectedRef, (snap) => {
             if (snap.val() === true) {
-                setDebugStatus('success', `Firebaseサーバーに正常接続中。部屋ID: ${roomId}`);
+                setDebugStatus('success', `Firebaseに正常接続中。部屋ID: ${roomId}`);
             } else {
                 setDebugStatus('loading', "接続テスト中...");
             }
@@ -126,7 +125,7 @@
                 players: {}
             };
             set(roomRef, initialData).then(() => {
-                joinRoom();
+                window.joinRoom();
             }).catch(err => {
                 alert(`部屋作成失敗: ${err.message}`);
             });
@@ -135,13 +134,13 @@
         window.joinRoom = function() {
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
-                if (currentData.status !== 'waiting') return;
+                if (currentData.status !== 'waiting') return currentData;
                 
                 if (!currentData.players) currentData.players = {};
                 if (!currentData.turnOrder) currentData.turnOrder = [];
                 
                 const currentCount = Object.keys(currentData.players).length;
-                if (currentCount >= currentData.maxPlayers) return;
+                if (currentCount >= currentData.maxPlayers) return currentData;
                 
                 const newId = "P" + (currentCount + 1);
                 myPlayerId = newId;
@@ -157,7 +156,7 @@
                     currentData.status = 'playing';
                     currentData.log += "【システム】全員揃いました！ゲームを開始します。\n";
                 } else {
-                    currentData.log += `【システム】${newId} が入室しました。\n`;
+                    currentData.log += `【システム】プレイヤー ${currentCount + 1} が入室しました。\n`;
                 }
                 
                 return currentData;
@@ -371,7 +370,7 @@
         <div class="section-title">全プレイヤーの状況</div>
         <div class="pvp-board" id="pvp-board"></div>
         <div id="turn-info" style="text-align: center; font-weight: bold; margin-bottom: 15px;"></div>
-        <div class="section-title">あなたの手札</div
+        <div class="section-title">あなたの手札</div>
         <div class="hand-container" id="hand-area"></div>
         <div class="section-title">コマンド</div>
         <div class="actions-grid">
@@ -386,4 +385,4 @@
     </div>
 </div>
 </body>
-</html>                 
+</html>
