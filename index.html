@@ -54,7 +54,8 @@
         .url-box { background: #e0f2fe; border: 1px solid #bae6fd; padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 15px; word-break: break-all; }
         .waiting-screen { text-align: center; padding: 30px; background: #f1f5f9; border-radius: 12px; margin-bottom: 15px; }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
@@ -93,21 +94,15 @@
         let timerInterval = null; 
 
         window.addEventListener('DOMContentLoaded', () => { 
-    document.getElementById('invite-url').innerText = window.location.href; 
-    
-    document.getElementById('btn-load-brain').onclick = async () => { 
-        try {
-            // index.htmlと同じ階層にあるので、ここは相対パスで確実に届きます
-            const model = await tf.loadLayersModel('./tfjs_model/model.json');
-            // 読み込んだモデルを、cpu-ai.js側の変数に無理やり上書きしてドッキング
-            const cpuModule = await import("./cpu-ai.js");
-            // ※ 動的にセットするための仕組みが必要なため、一度「案A」を試した後に
-            // うまくいかなければこちらのコードを調整した完全版を投げ直しますね！
-        } catch(e) {
-            alert("エラー詳細: " + e.message);
-        }
-    };
-});
+            document.getElementById('invite-url').innerText = window.location.href; 
+            
+            // 📥 脳みそ手動ロードボタン
+            document.getElementById('btn-load-brain').onclick = async () => { 
+                const success = await loadBrain(); 
+                if(success) alert("📥 Colabで育てた脳みそをロードしました！AIの自動思考が有効化されます。");
+                else alert("⚠️ 脳みそファイルが見つからないか、読み込みに失敗しました。");
+            };
+        });
 
         onValue(roomRef, (snapshot) => {
             const data = snapshot.val();
@@ -136,7 +131,6 @@
                 if (gameState.status === 'playing') {
                     if (myPlayerId === 'P1') startHostTimer();
 
-                    // AIの手番かつ自分がホスト(P1)の場合、AIロジックを呼び出す
                     const activePlayerId = gameState.turnOrder ? gameState.turnOrder[gameState.currentTurnIdx] : null;
                     if (activePlayerId && activePlayerId !== myPlayerId && myPlayerId === 'P1') {
                         setTimeout(() => { executeCPUTurn(roomRef, activePlayerId); }, 1000);
