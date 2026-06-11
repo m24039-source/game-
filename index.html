@@ -76,7 +76,7 @@
         let gameState = {};
         let myPlayerId = null; 
         let selectedIndices = [];
-        let localTurnDrawn = false; // 自分の現在のターンで既にドロー処理をしたかどうかのローカルフラグ
+        let currentProcessedTurnIdx = -1; // 最後にドロー処理を行ったターンインデックスを記録する変数
 
         window.addEventListener('DOMContentLoaded', () => { 
             document.getElementById('invite-url').innerText = window.location.href; 
@@ -109,14 +109,26 @@
             } else if (gameState.status === 'playing') {
                 document.getElementById('waiting-screen').style.display = 'none';
                 document.getElementById('game-screen').style.display = 'block';
+                
                 if (myPlayerId) {
-                    // ★【新仕様】2ターン目以降かつ、自分の手番が回ってきた瞬間に自動で1枚ドローする（未処理の場合のみ）
                     const activePlayerId = gameState.turnOrder[gameState.currentTurnIdx];
-                    if (activePlayerId === myPlayerId && gameState.turnCount >= 2 && !localTurnDrawn) {
-                        localTurnDrawn = true; // 重複実行防止
-                        triggerStartTurnDraw();
-                    } else if (activePlayerId !== myPlayerId) {
-                        localTurnDrawn = false; // 相手のターン中はフラグをリセット
+                    
+                    // ★【新仕様】自分の手番の時の自動ドロー判定
+                    if (activePlayerId === myPlayerId && gameState.absoluteTurnIdx !== currentProcessedTurnIdx) {
+                        currentProcessedTurnIdx = gameState.absoluteTurnIdx; // 処理済みとして記録
+                        
+                        // 先攻の1ターン目（ゲームの最初の最初: absoluteTurnIdx === 0）だけドローをスキップ
+                        if (gameState.absoluteTurnIdx === 0) {
+                            // ログにだけスキップの旨を書き込む
+                            runTransaction(roomRef, (currentData) => {
+                                if (!currentData) return currentData;
+                                currentData.log += `🏁 ゲームスタート！先攻の1ターン目はドローなしで開始します。\n`;
+                                return currentData;
+                            });
+                        } else {
+                            // それ以外（後攻の最初や2週目など）はすべてターン開始時に1枚ドロー！
+                            triggerStartTurnDraw();
+                        }
                     }
                     updateDOM();
                 }
@@ -129,7 +141,8 @@
             const initialData = {
                 status: 'waiting',
                 maxPlayers: maxPlayers,
-                turnCount: 1,
+                turnCount: 1,      // 何周目か
+                absoluteTurnIdx: 0, // 通算のターン数カウント (0: 先攻1番手, 1: 後攻2番手...)
                 turnOrder: [],
                 currentTurnIdx: 0,
                 log: "【システム】部屋が作成されました。参加を待っています。\n",
@@ -156,16 +169,22 @@
                 const newId = "P" + (currentCount + 1);
                 myPlayerId = newId;
                 
+                // ★【新仕様】初期手札を「1〜10の数字の中からランダムに5枚」生成
+                let randomHand = [];
+                for(let i = 0; i < 5; i++) {
+                    randomHand.push(Math.floor(Math.random() * 10) + 1);
+                }
+                
                 currentData.players[newId] = {
                     name: `プレイヤー ${currentCount + 1}`,
                     score: 0,
-                    hand: [5, 6, 8, 15, 30, 45]
+                    hand: randomHand
                 };
                 currentData.turnOrder.push(newId);
                 
                 if (Object.keys(currentData.players).length == currentData.maxPlayers) {
                     currentData.status = 'playing';
-                    currentData.log += "【システム】全員揃いました！ゲームを開始します（1ターン目はドローなし）。\n";
+                    currentData.log += "【システム】全員揃いました！ゲームを開始します。\n";
                 } else {
                     currentData.log += `【システム】プレイヤー ${currentCount + 1} が入室しました。\n`;
                 }
@@ -176,19 +195,19 @@
             });
         };
 
-        // ターン開始時に自動でカードを引き、ログに記録するトランザクション
+        // ターン開始時に自動でカードを引く処理
         function triggerStartTurnDraw() {
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
                 const activePlayerId = currentData.turnOrder[currentData.currentTurnIdx];
-                if (activePlayerId !== myPlayerId) return currentData; // 念のため自分自身か再確認
+                if (activePlayerId !== myPlayerId) return currentData; 
                 
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
-                let drawn = Math.floor(Math.random() * 20) + 1;
+                let drawn = Math.floor(Math.random() * 20) + 1; // ドローするカードは1〜20の通常範囲
                 hand.push(drawn);
                 
                 currentData.players[myPlayerId].hand = hand;
-                currentData.log += `📥 ターン開始！ ${currentData.players[myPlayerId].name} は [${drawn}] をドローしました。\n`;
+                currentData.log += `📥 ターン開始ドロー: ${currentData.players[myPlayerId].name} は [${drawn}] を引きました。\n`;
                 return currentData;
             });
         }
@@ -224,7 +243,7 @@
             const turnInfo = document.getElementById('turn-info');
             if (turnInfo) {
                 if (isMyTurn) {
-                    turnInfo.innerText = `★ あなたの番です (ターン数: ${gameState.turnCount})`;
+                    turnInfo.innerText = `★ あなたの番です (周回数: ${gameState.turnCount}ターン目)`;
                     turnInfo.style.color = "var(--primary)";
                 } else {
                     const activeName = gameState.players[activePlayerId]?.name || activePlayerId;
@@ -327,6 +346,7 @@
 
         function advanceTurn(currentData) {
             currentData.currentTurnIdx = (currentData.currentTurnIdx + 1) % currentData.turnOrder.length;
+            currentData.absoluteTurnIdx++; // 通算ターン数を1進める
             if (currentData.currentTurnIdx === 0) {
                 currentData.turnCount++;
             }
@@ -339,20 +359,18 @@
         }
 
         // ==========================================
-        // 🔮 数理特殊変換・合成コマンド群 (移植＆マルチ対応版)
+        // 🔮 数理特殊変換・合成コマンド群
         // ==========================================
         window.opAdd = function() { executeOp((a, b) => a + b, "➕ 足し算"); };
         window.opSub = function() { executeOp((a, b) => a - b, "➖ 引き算", true); };
         
-        // 操作A: 商 × 余 (2枚選択)
         window.opDivProduct = function() {
             executeOp((a, b) => {
-                if (b === 0) return -1; // 0除算防止用フラグ
+                if (b === 0) return -1;
                 return Math.floor(a / b) * (a % b);
             }, "操作A: 商×余", false, true);
         };
 
-        // 操作B: 桁和合成 (1枚選択)
         window.opDigitSumDiv = function() {
             let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
             if (selectedIndices.length !== 1) return alert('手札を1枚選んでください');
@@ -360,20 +378,19 @@
             let num = myHand[selectedIndices[0]];
             let sum = String(num).split('').reduce((s, d) => s + parseInt(d), 0);
             if (sum === 0) return alert('桁の和が0のため変換できません');
-            
+
             let res = Math.floor(num / sum) * (num % sum);
             
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
-                hand[selectedIndices[0]] = res; // 選択したカードを上書き
+                hand[selectedIndices[0]] = res;
                 currentData.players[myPlayerId].hand = hand;
-                currentData.log += `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] ➡ 桁和(${sum}) ➡ [${res}]\n`;
+                currentData.log += `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] ➡ [${res}]\n`;
                 return currentData;
             }).then(() => { selectedIndices = []; });
         };
 
-        // 操作C: 最大公約数（GCD）掛け (2枚選択)
         window.opGcdMul = function() {
             let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
             if (selectedIndices.length !== 2) return alert('手札を2枚選んでください');
@@ -381,7 +398,6 @@
             let X = myHand[selectedIndices[0]];
             let Y = myHand[selectedIndices[1]];
             
-            // ユークリッドの互除法で最大公約数を計算
             let a = X, b = Y;
             while (b !== 0) {
                 let t = b; b = a % b; a = t;
@@ -396,23 +412,21 @@
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 let firstIdx = Math.min(selectedIndices[0], selectedIndices[1]);
                 let secondIdx = Math.max(selectedIndices[0], selectedIndices[1]);
-                // 2枚を取り除く
                 hand = hand.filter((_, i) => i !== firstIdx && i !== secondIdx);
                 hand.push(res);
                 currentData.players[myPlayerId].hand = hand;
-                currentData.log += `🔮 ${currentData.players[myPlayerId].name} が操作C(GCD): [${X}] と [${Y}] ➡ GCD(${gcd})を掛けて [${res}]\n`;
+                currentData.log += `🔮 ${currentData.players[myPlayerId].name} が操作C(GCD): [${X}] と [${Y}] ➡ [${res}]\n`;
                 return currentData;
             }).then(() => { selectedIndices = []; });
         };
         
-        // 汎用2枚合成処理（足し算、引き算、商×余で使用）
         function executeOp(formula, label, checkSub = false, isDivProd = false) {
             let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
             if (selectedIndices.length !== 2) return alert('手札を2枚選んでください');
             let n1 = myHand[selectedIndices[0]], n2 = myHand[selectedIndices[1]];
             
             let res = formula(n1, n2);
-            if (isDivProd && res === -1) return alert('0で割ることはできません。選ぶ順番を変えてください。');
+            if (isDivProd && res === -1) return alert('0で割ることはできません。');
             if (checkSub && res <= 0) return alert('0以下になる引き算はできません');
             
             runTransaction(roomRef, (currentData) => {
@@ -482,3 +496,4 @@
 </div>
 </body>
 </html>
+     
