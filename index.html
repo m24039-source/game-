@@ -61,8 +61,8 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, set, onValue, update, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
         
-        // 🤖 外部の強化学習AIロジックを読み込み
-        import { executeCPUTurn, loadBrain } from "./cpu-ai.js";
+        // 🚨 後ろに ?v=2 をつけてキャッシュから強制的に引き剥がします
+        import { executeCPUTurn, loadBrain } from "./cpu-ai.js?v=2";
         
         const firebaseConfig = { databaseURL: "https://math-tactics-default-rtdb.firebaseio.com/" };
         let db, roomRef, roomId = window.location.hash.substring(1);
@@ -96,7 +96,6 @@
         window.addEventListener('DOMContentLoaded', () => { 
             document.getElementById('invite-url').innerText = window.location.href; 
             
-            // 📥 脳みそ手動ロードボタン
             document.getElementById('btn-load-brain').onclick = async () => { 
                 const success = await loadBrain(); 
                 if(success) alert("📥 Colabで育てた脳みそをロードしました！AIの自動思考が有効化されます。");
