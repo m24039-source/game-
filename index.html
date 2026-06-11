@@ -76,7 +76,7 @@
         let gameState = {};
         let myPlayerId = null; 
         let selectedIndices = [];
-        let currentProcessedTurnIdx = -1; // 最後にドロー処理を行ったターンインデックスを記録する変数
+        let currentProcessedTurnIdx = -1; 
 
         window.addEventListener('DOMContentLoaded', () => { 
             document.getElementById('invite-url').innerText = window.location.href; 
@@ -113,20 +113,16 @@
                 if (myPlayerId) {
                     const activePlayerId = gameState.turnOrder[gameState.currentTurnIdx];
                     
-                    // ★【新仕様】自分の手番の時の自動ドロー判定
                     if (activePlayerId === myPlayerId && gameState.absoluteTurnIdx !== currentProcessedTurnIdx) {
-                        currentProcessedTurnIdx = gameState.absoluteTurnIdx; // 処理済みとして記録
+                        currentProcessedTurnIdx = gameState.absoluteTurnIdx; 
                         
-                        // 先攻の1ターン目（ゲームの最初の最初: absoluteTurnIdx === 0）だけドローをスキップ
                         if (gameState.absoluteTurnIdx === 0) {
-                            // ログにだけスキップの旨を書き込む
                             runTransaction(roomRef, (currentData) => {
                                 if (!currentData) return currentData;
-                                currentData.log += `🏁 ゲームスタート！先攻の1ターン目はドローなしで開始します。\n`;
+                                currentData.log += `🏁 ゲームスタート！先攻の1ターン目はドローなし＆全員1周目は攻撃禁止です。\n`;
                                 return currentData;
                             });
                         } else {
-                            // それ以外（後攻の最初や2週目など）はすべてターン開始時に1枚ドロー！
                             triggerStartTurnDraw();
                         }
                     }
@@ -141,8 +137,8 @@
             const initialData = {
                 status: 'waiting',
                 maxPlayers: maxPlayers,
-                turnCount: 1,      // 何周目か
-                absoluteTurnIdx: 0, // 通算のターン数カウント (0: 先攻1番手, 1: 後攻2番手...)
+                turnCount: 1,      
+                absoluteTurnIdx: 0, 
                 turnOrder: [],
                 currentTurnIdx: 0,
                 log: "【システム】部屋が作成されました。参加を待っています。\n",
@@ -169,7 +165,6 @@
                 const newId = "P" + (currentCount + 1);
                 myPlayerId = newId;
                 
-                // ★【新仕様】初期手札を「1〜10の数字の中からランダムに5枚」生成
                 let randomHand = [];
                 for(let i = 0; i < 5; i++) {
                     randomHand.push(Math.floor(Math.random() * 10) + 1);
@@ -195,7 +190,6 @@
             });
         };
 
-        // ターン開始時に自動でカードを引く処理
         function triggerStartTurnDraw() {
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
@@ -203,7 +197,7 @@
                 if (activePlayerId !== myPlayerId) return currentData; 
                 
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
-                let drawn = Math.floor(Math.random() * 20) + 1; // ドローするカードは1〜20の通常範囲
+                let drawn = Math.floor(Math.random() * 20) + 1; 
                 hand.push(drawn);
                 
                 currentData.players[myPlayerId].hand = hand;
@@ -243,8 +237,14 @@
             const turnInfo = document.getElementById('turn-info');
             if (turnInfo) {
                 if (isMyTurn) {
-                    turnInfo.innerText = `★ あなたの番です (周回数: ${gameState.turnCount}ターン目)`;
-                    turnInfo.style.color = "var(--primary)";
+                    // 最初の1周目（turnCount === 1）かどうかを視覚的に伝える
+                    if (gameState.turnCount === 1) {
+                        turnInfo.innerText = `★ あなたの番です (1周目: 🛑現在攻撃禁止期間)`;
+                        turnInfo.style.color = "#f59e0b";
+                    } else {
+                        turnInfo.innerText = `★ あなたの番です (周回数: ${gameState.turnCount}ターン目)`;
+                        turnInfo.style.color = "var(--primary)";
+                    }
                 } else {
                     const activeName = gameState.players[activePlayerId]?.name || activePlayerId;
                     turnInfo.innerText = `${activeName} の番です。待機中...`;
@@ -286,12 +286,23 @@
             }
         }
 
+        // ★【変更】攻撃処理
         window.executeAttack = function() {
+            // 仕様1: 1周目（turnCountが1）は全員攻撃不可
+            if (gameState.turnCount === 1) {
+                return alert('【ルール】ゲームの最初の1周目（全員の1ターン目）は攻撃できません！合成などで手札を整えてください。');
+            }
+
             let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
             if (selectedIndices.length !== 1) return alert('攻撃に使う手札を1枚選んでください。');
             
             let myIdx = selectedIndices[0];
             let attackNum = myHand[myIdx];
+            
+            // 仕様2: 数字の「1」での攻撃は無効（ノーカン）
+            if (attackNum === 1) {
+                return alert('【ルール】「1」で攻撃することはできません（1で割れてもノーカンです）。別の数字を使ってください。');
+            }
             
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
@@ -306,6 +317,7 @@
                     
                     let keptCards = [];
                     targetHand.forEach(cardNum => {
+                        // 攻撃側の数字（attackNum）で割り切れるか判定
                         if (cardNum % attackNum === 0) {
                             totalGainedPoints += cardNum;
                             currentData.log += ` 🎯 ${currentData.players[pid].name} の [${cardNum}] を撃破！\n`;
@@ -320,22 +332,23 @@
                 updatedMyHand.splice(myIdx, 1);
                 currentData.players[myPlayerId].hand = updatedMyHand;
                 currentData.players[myPlayerId].score += totalGainedPoints;
-                currentData.log += `⚔️ ${attackPlayerName} が [${attackNum}] で攻撃！ 計 ${totalGainedPoints} 点獲得！\n`;
+                currentData.log += `⚔️ ${attackPlayerName} が [${attackNum}] で攻撃！ 計 ${totalGainedPoints} 点獲得！(ターンは継続します)\n`;
                 
-                advanceTurn(currentData);
+                // 仕様3: advanceTurn(currentData); を削除し、演算（合成）と同様にターンが終わらないように変更
                 return currentData;
             }).then(() => {
                 selectedIndices = [];
             });
         };
 
+        // 🚪 手動パスボタンを押した時だけ次のプレイヤーへターンを回す
         window.endTurn = function() {
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
                 let activePlayerId = currentData.turnOrder[currentData.currentTurnIdx];
                 let pName = currentData.players[activePlayerId].name;
                 
-                currentData.log += `🚪 ${pName} は何もせずパスしました。（次のプレイヤーへ）\n`;
+                currentData.log += `🚪 ${pName} が行動を終了しました。（次のプレイヤーへ）\n`;
                 
                 advanceTurn(currentData);
                 return currentData;
@@ -346,7 +359,7 @@
 
         function advanceTurn(currentData) {
             currentData.currentTurnIdx = (currentData.currentTurnIdx + 1) % currentData.turnOrder.length;
-            currentData.absoluteTurnIdx++; // 通算ターン数を1進める
+            currentData.absoluteTurnIdx++; 
             if (currentData.currentTurnIdx === 0) {
                 currentData.turnCount++;
             }
@@ -372,13 +385,13 @@
         };
 
         window.opDigitSumDiv = function() {
-            let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
+            let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ?
             if (selectedIndices.length !== 1) return alert('手札を1枚選んでください');
             
             let num = myHand[selectedIndices[0]];
             let sum = String(num).split('').reduce((s, d) => s + parseInt(d), 0);
             if (sum === 0) return alert('桁の和が0のため変換できません');
-
+            
             let res = Math.floor(num / sum) * (num % sum);
             
             runTransaction(roomRef, (currentData) => {
@@ -481,7 +494,7 @@
         <div class="section-title">コマンド</div>
         <div class="actions-grid">
             <button class="btn-attack" onclick="executeAttack()">⚔️ 選択したカードの約数を相手全員から強奪！</button>
-            <button class="btn-main" onclick="endTurn()">🚪 何もせずパス（ターンを回す）</button>
+            <button class="btn-main" onclick="endTurn()">🚪 行動を終了して次の人に交代する</button>
             <button class="btn-op" onclick="opAdd()">➕ 足し算 (2枚選択)</button>
             <button class="btn-op" onclick="opSub()">➖ 引き算 (2枚選択)</button>
             <button class="btn-op" onclick="opDivProduct()">🧩 操作A: 商×余 (2枚選択)</button>
@@ -496,4 +509,3 @@
 </div>
 </body>
 </html>
-     
