@@ -384,17 +384,34 @@
             
             let num = myHand[selectedIndices[0]];
             // 桁の合計を計算
-            let sum = String(num).split('').reduce((s, d) => s + parseInt(d), 0);
+           let sum = String(num).split('').reduce((s, d) => s + parseInt(d), 0);
             if (sum === 0) return alert('桁の和が0のため変換できません');
             
-            let res = Math.floor(num / sum) * (num % sum);
+            // 商と余りをそれぞれ独立して算出
+            let quotient = Math.floor(num / sum);
+            let remainder = num % sum;
             
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
-                hand[selectedIndices[0]] = res;
+                
+                // 選択した元のカードを1枚取り除く
+                hand.splice(selectedIndices[0], 1);
+                
+                // 商のカードを追加
+                hand.push(quotient);
+                
+                let logMsg = "";
+                // 余りがある（0より大きい）場合のみ、余りのカードも独立して追加して分裂させる
+                if (remainder > 0) {
+                    hand.push(remainder);
+                    logMsg = `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] を桁和(${sum})で分解 ➡ [${quotient}] と [${remainder}] の2枚に分裂しました！\n`;
+                } else {
+                    logMsg = `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] を桁和(${sum})で分解 ➡ 余りがないため [${quotient}] に変換されました。\n`;
+                }
+                
                 currentData.players[myPlayerId].hand = hand;
-                currentData.log += `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] ➡ [${res}]\n`;
+                currentData.log += logMsg;
                 return currentData;
             }).then(() => { selectedIndices = []; });
         };
@@ -419,7 +436,7 @@
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 let firstIdx = Math.min(selectedIndices[0], selectedIndices[1]);
-                let secondIdx = Math.max(selectedIndices[0], selectedIndices[1]);
+                let secondIdx = Math.max(selectedIndices[0], secondIndices[1]);
                 hand = hand.filter((_, i) => i !== firstIdx && i !== secondIdx);
                 hand.push(res);
                 currentData.players[myPlayerId].hand = hand;
@@ -441,7 +458,7 @@
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 let firstIdx = Math.min(selectedIndices[0], selectedIndices[1]);
-                let secondIdx = Math.max(selectedIndices[0], selectedIndices[1]);
+                let secondIdx = Math.max(selectedIndices[0], secondIndices[1]);
                 hand = hand.filter((_, i) => i !== firstIdx && i !== secondIdx);
                 hand.push(res);
                 currentData.players[myPlayerId].hand = hand;
@@ -493,7 +510,7 @@
             <button class="btn-op" onclick="opAdd()">➕ 足し算 (2枚選択)</button>
             <button class="btn-op" onclick="opSub()">➖ 引き算 (2枚選択)</button>
             <button class="btn-op" onclick="opDivProduct()">🧩 操作A: 商×余 (2枚選択)</button>
-            <button class="btn-op" onclick="opDigitSumDiv()">🔢 操作B: 桁和 (1枚選択)</button>
+            <button class="btn-op" onclick="opDigitSumDiv()">🔢 操作B: 桁和で2枚に分裂 (1枚選択)</button>
             <button class="btn-op" style="grid-column: span 2; background: #faf5ff;" onclick="opGcdMul()">🔮 操作C: 最大公約数を掛ける (2枚選択)</button>
         </div>
         
@@ -504,4 +521,3 @@
 </div>
 </body>
 </html>
-           
