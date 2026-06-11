@@ -39,13 +39,9 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, set, onValue, update, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
         
-        // ==========================================
-        // 👇【重要】あなたのFirebase URLに書き換えてください！
-        // ==========================================
         const firebaseConfig = { 
             databaseURL: "https://math-tactics-default-rtdb.firebaseio.com/" 
         };
-        // ==========================================
         
         let db, roomRef, roomId = window.location.hash.substring(1);
         if (!roomId) { roomId = "room_" + Math.random().toString(36).substring(2, 11); window.location.hash = roomId; }
@@ -62,11 +58,9 @@
             document.getElementById('invite-url').innerText = window.location.href; 
         });
 
-        // データベース監視
         onValue(roomRef, (snapshot) => {
             const data = snapshot.val();
             if (!data) {
-                // 部屋がまだない場合、初期設定パネルを表示
                 document.getElementById('room-setup').style.display = 'block';
                 document.getElementById('waiting-screen').style.display = 'none';
                 document.getElementById('game-screen').style.display = 'none';
@@ -76,7 +70,6 @@
             gameState = data;
             document.getElementById('room-setup').style.display = 'none';
             
-            // 全員揃っているかチェック
             const currentPlayersCount = gameState.players ? Object.keys(gameState.players).length : 0;
             
             if (gameState.status === 'waiting') {
@@ -85,7 +78,6 @@
                 document.getElementById('current-count').innerText = currentPlayersCount;
                 document.getElementById('target-count').innerText = gameState.maxPlayers;
                 
-                // 自分がまだ入室してなくて、空きがあれば自動入室ボタンなどの制御
                 if (!myPlayerId) {
                     document.getElementById('btn-auto-join').style.display = 'block';
                 } else {
@@ -98,7 +90,6 @@
             }
         });
 
-        // 部屋を新規作成する（ホスト）
         window.createRoom = function(maxPlayers) {
             const initialData = {
                 status: 'waiting',
@@ -110,33 +101,30 @@
                 players: {}
             };
             set(roomRef, initialData).then(() => {
-                joinRoom(); // 作成したら自動で入室
+                joinRoom();
             });
         };
 
-        // 部屋に参加する
         window.joinRoom = function() {
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
-                if (currentData.status !== 'waiting') return; // すでに始まっていたら入れない
+                if (currentData.status !== 'waiting') return;
                 
                 if (!currentData.players) currentData.players = {};
                 const currentCount = Object.keys(currentData.players).length;
                 
-                if (currentCount >= currentData.maxPlayers) return; // 満員
+                if (currentCount >= currentData.maxPlayers) return;
                 
-                // 新しいプレイヤーのID（P1, P2, P3...）を決定
                 const newId = "P" + (currentCount + 1);
                 myPlayerId = newId;
                 
                 currentData.players[newId] = {
                     name: `プレイヤー ${currentCount + 1}`,
                     score: 0,
-                    hand: [5, 6, 8, 15, 30, 45] // 初期手札 (テストしやすいよう例の数字も追加)
+                    hand: [5, 6, 8, 15, 30, 45]
                 };
                 currentData.turnOrder.push(newId);
                 
-                // 設定人数に達したら自動でゲーム開始状態にする
                 if (Object.keys(currentData.players).length == currentData.maxPlayers) {
                     currentData.status = 'playing';
                     currentData.log += "【システム】全員揃いました！ゲームを開始します。\n";
@@ -155,13 +143,11 @@
             const activePlayerId = gameState.turnOrder[gameState.currentTurnIdx];
             const isMyTurn = (activePlayerId === myPlayerId);
             
-            // 全プレイヤーのステータスを表示
             gameState.turnOrder.forEach(pid => {
                 const p = gameState.players[pid];
                 const div = document.createElement('div');
                 div.className = "player-status" + (pid === activePlayerId ? ' active-turn' : '') + (pid === myPlayerId ? ' my-status' : '');
                 
-                // 手札配列の安全な取得
                 const handArr = p.hand ? (Array.isArray(p.hand) ? p.hand : Object.values(p.hand)) : [];
                 
                 div.innerHTML = `
@@ -176,7 +162,6 @@
                 board.appendChild(div);
             });
 
-            // ターンアナウンス
             const turnInfo = document.getElementById('turn-info');
             if (isMyTurn) {
                 turnInfo.innerText = `★ あなたの番です (ターン数: ${gameState.turnCount})`;
@@ -187,10 +172,8 @@
                 turnInfo.style.color = "#64748b";
             }
 
-            // コマンドボタンの制御
             document.querySelectorAll('.actions-grid button').forEach(btn => { btn.disabled = !isMyTurn; });
 
-            // 自分の手札レンダリング
             const myHandArr = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
             const handArea = document.getElementById('hand-area'); 
             handArea.innerHTML = '';
@@ -215,19 +198,17 @@
                 });
             }
 
-            // ログ更新
             const logArea = document.getElementById('log-area'); 
             logArea.innerText = gameState.log; 
             logArea.scrollTop = logArea.scrollHeight;
         }
 
-        // ⚔️ 新ルール：約数奪取アタックコマンド！
         window.executeAttack = function() {
             let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
             if (selectedIndices.length !== 1) return alert('攻撃に使う手札を1枚選んでください。');
             
             let myIdx = selectedIndices[0];
-            let attackNum = myHand[myIdx]; // 攻撃に使う数 (例: 15)
+            let attackNum = myHand[myIdx];
             
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
@@ -235,27 +216,23 @@
                 let totalGainedPoints = 0;
                 let attackPlayerName = currentData.players[myPlayerId].name;
                 
-                // 1. 自分以外のプレイヤーの手札を検査して約数があれば奪う
                 Object.keys(currentData.players).forEach(pid => {
-                    if (pid === myPlayerId) return; // 自分はスキップ
+                    if (pid === myPlayerId) return;
                     
                     let targetHand = currentData.players[pid].hand ? (Array.isArray(currentData.players[pid].hand) ? currentData.players[pid].hand : Object.values(currentData.players[pid].hand)) : [];
                     
-                    // 相手の手札の数が、自分の出した数の倍数（＝相手から見て自分の数が約数）であるものを探す
-                    // 例: 相手の数(30) % 自分の数(15) === 0
                     let keptCards = [];
                     targetHand.forEach(cardNum => {
                         if (cardNum % attackNum === 0) {
-                            totalGainedPoints += cardNum; // そのポイントを蓄積
+                            totalGainedPoints += cardNum;
                             currentData.log += ` 🎯 ${currentData.players[pid].name} の [${cardNum}] を撃破！\n`;
                         } else {
-                            keptCards.push(cardNum); // 残るカード
+                            keptCards.push(cardNum);
                         }
                     });
-                    currentData.players[pid].hand = keptCards; // 相手の手札を更新
+                    currentData.players[pid].hand = keptCards;
                 });
                 
-                // 2. 自分の手札から使ったカードを消し、ポイントを加算
                 let updatedMyHand = targetHandArray(currentData.players[myPlayerId].hand);
                 updatedMyHand.splice(myIdx, 1);
                 currentData.players[myPlayerId].hand = updatedMyHand;
@@ -263,16 +240,13 @@
                 
                 currentData.log += `⚔️ ${attackPlayerName} が [${attackNum}] で攻撃！ 計 ${totalGainedPoints} 点獲得！\n`;
                 
-                // ターン終了処理も同時に行う
                 advanceTurn(currentData);
-                
                 return currentData;
             }).then(() => {
                 selectedIndices = [];
             });
         };
 
-        // 🚪 行動終了（パス）
         window.endTurn = function() {
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
@@ -280,7 +254,6 @@
                 let activePlayerId = currentData.turnOrder[currentData.currentTurnIdx];
                 let pName = currentData.players[activePlayerId].name;
                 
-                // 1枚ランダムドロー
                 let hand = targetHandArray(currentData.players[activePlayerId].hand);
                 let drawn = Math.floor(Math.random() * 20) + 1;
                 hand.push(drawn);
@@ -295,7 +268,6 @@
             });
         };
 
-        // ターンを次に進める内部処理
         function advanceTurn(currentData) {
             currentData.currentTurnIdx = (currentData.currentTurnIdx + 1) % currentData.turnOrder.length;
             if (currentData.currentTurnIdx === 0) {
@@ -308,7 +280,6 @@
             return Object.values(handData);
         }
 
-        // 各種合成コマンド（簡易対応版）
         window.opAdd = function() { executeOp((a, b) => a + b, "➕ 足し算"); };
         window.opSub = function() { executeOp((a, b) => a - b, "➖ 引き算", true); };
         
@@ -345,7 +316,6 @@
         <button style="background:#7c3aed; color:white; padding:10px 20px; margin:5px;" onclick="createRoom(3)">3人部屋を作る</button>
         <button style="background:#10b981; color:white; padding:10px 20px; margin:5px;" onclick="createRoom(4)">4人部屋を作る</button>
     </div>
-
 
     <div id="waiting-screen" class="waiting-screen" style="display:none;">
         <h3>👥 プレイヤーの参加を待っています...</h3>
