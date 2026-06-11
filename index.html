@@ -224,8 +224,7 @@
             }
             return hand;
         }
-
-        window.createRoom = function(maxPlayers, useAI = false) {
+        window.createRoom = async function(maxPlayers) {
             const config = {
                 initHandCount: parseInt(document.getElementById('cfg-init-hand-count').value) || 5,
                 initMaxNum: parseInt(document.getElementById('cfg-init-max-num').value) || 10,
@@ -234,64 +233,33 @@
                 handLimitNum: parseInt(document.getElementById('cfg-hand-limit-num').value) || 150,
                 winScore: parseInt(document.getElementById('cfg-win-score').value) || 100,
                 maxTurns: parseInt(document.getElementById('cfg-max-turns').value) || 10,
-                totalTimeStock: parseInt(document.getElementById('cfg-total-time-stock').value) || 5,
-                turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30
+                totalTimeStock: parseInt(document.getElementById('cfg-total-time-stock').value) || 5, 
+                turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30    
             };
 
-            myPlayerId = "P1";
             const initialData = {
-                status: 'playing', // AI対戦時は即座に開始
+                status: 'waiting',
                 maxPlayers: maxPlayers,
                 turnCount: 1,      
                 absoluteTurnIdx: 0, 
-                turnOrder: ["P1"],
+                turnOrder: [],
                 currentTurnIdx: 0,
                 remainingTime: config.turnLimitTime, 
-                timerMode: "stock",
+                timerMode: "stock", 
+                log: "【システム】部屋が作成されました。AI対戦モードが有効です。\n",
                 config: config,
-                players: {
-                    "P1": {
-                        name: "プレイヤー 1",
-                        score: 0,
-                        hand: generateRandomHand(config.initHandCount, config.initMaxNum),
-                        timeStock: config.totalTimeStock * 60
-                    }
-                },
-                log: `【システム】AI対戦モードが開始されました。相手は計算兵器です！\n`
+                players: {}
             };
-
-            // 人数に合わせてCPUを追加
-            for(let i = 2; i <= maxPlayers; i++) {
-                const cpuId = "CPU_" + i;
-                initialData.turnOrder.push(cpuId);
-                initialData.players[cpuId] = {
-                    name: `🤖 計算AI (Lv.1) - ${i}`,
-                    score: 0,
-                    hand: generateRandomHand(config.initHandCount, config.initMaxNum),
-                    timeStock: config.totalTimeStock * 60
-                };
-            }
-
-            if (!useAI) {
-                // 通常の対戦待ちモード
-                initialData.status = 'waiting';
-                initialData.turnOrder = ["P1"];
-                delete initialData.players;
-                initialData.players = {
-                    "P1": {
-                        name: "プレイヤー 1",
-                        score: 0,
-                        hand: generateRandomHand(config.initHandCount, config.initMaxNum),
-                        timeStock: config.totalTimeStock * 60
-                    }
-                };
-                initialData.log = "【システム】対戦部屋が作成されました。待機中...\n";
-            }
-
-            set(roomRef, initialData).catch(err => {
+            
+            try {
+                // 💡 await を使うことで、Firebaseにデータが書き込み終わるのを確実に待ちます
+                await set(roomRef, initialData);
+                window.joinRoom();
+            } catch (err) {
                 alert(`部屋作成失敗: ${err.message}`);
-            });
+            }
         };
+
 
         window.joinRoom = function() {
             runTransaction(roomRef, (currentData) => {
