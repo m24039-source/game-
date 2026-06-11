@@ -16,8 +16,10 @@
         .status-success { background: #10b981; }
         .status-error { background: #ef4444; }
 
-        .timer-panel { background: #fff1f2; border: 2px solid #fecdd3; padding: 10px; border-radius: 12px; text-align: center; margin-bottom: 15px; }
-        .timer-count { font-size: 28px; font-weight: bold; color: var(--danger); font-family: monospace; }
+        /* ⏱️ タイマー表示パネルのスタイル */
+        .timer-panel { background: #fff1f2; border: 2px solid #fecdd3; padding: 12px; border-radius: 12px; text-align: center; margin-bottom: 15px; }
+        .timer-title { font-size: 12px; color: #991b1b; font-weight: bold; margin-bottom: 4px; }
+        .timer-count { font-size: 32px; font-weight: bold; color: var(--danger); font-family: monospace; }
 
         .setup-panel { background: #f1f5f9; padding: 15px; border-radius: 12px; margin-bottom: 15px; }
         .setting-group { display: flex; flex-direction: column; gap: 8px; text-align: left; margin-bottom: 15px; background: white; padding: 12px; border-radius: 8px; border: 1px solid var(--border); }
@@ -31,7 +33,8 @@
         .active-turn { box-shadow: 0 0 12px rgba(37,99,235,0.6); border-color: var(--primary) !important; background: #eff6ff; }
         .my-status { border-color: #cbd5e1; background: #f1f5f9; }
         .player-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; margin-bottom: 8px; }
-        .score-display { font-size: 18px; color: var(--success); font-weight: bold; }
+        .player-time-stock { font-size: 12px; color: #64748b; font-weight: normal; margin-top: 2px; }
+        .score-display { font-size: 18px; color: var(--success); font-weight: bold; text-align: right; }
         .mini-card-container { display: flex; flex-wrap: wrap; gap: 6px; }
         .mini-card { background: white; border: 1px solid #cbd5e1; padding: 4px 10px; border-radius: 4px; font-size: 14px; font-weight: bold; }
         .section-title { font-size: 13px; font-weight: bold; color: #64748b; margin-bottom: 8px; border-left: 4px solid var(--primary); padding-left: 8px; }
@@ -129,7 +132,6 @@
                 document.getElementById('game-screen').style.display = 'block';
                 
                 if (gameState.status === 'playing') {
-                    // 【修正】myPlayerId の有無に関わらず、同期データに基づいてP1端末であればタイマーを常時稼働監視する設計に変更
                     if (myPlayerId === 'P1') {
                         startHostTimer();
                     }
@@ -161,25 +163,43 @@
             setDebugStatus('error', `通信拒否: ${error.message}`);
         });
 
+        // ⏱️ 将棋式カウントダウン（ホストP1監視処理）
         function startHostTimer() {
             if (timerInterval) return; 
             timerInterval = setInterval(() => {
                 runTransaction(roomRef, (currentData) => {
                     if (!currentData || currentData.status !== 'playing') return currentData;
                     
+                    const activePlayerId = currentData.turnOrder[currentData.currentTurnIdx];
+                    if (!activePlayerId || !currentData.players[activePlayerId]) return currentData;
+                    
+                    let p = currentData.players[activePlayerId];
+                    if (p.timeStock === undefined) {
+                        p.timeStock = (currentData.config?.totalTimeStock || 5) * 60; // 秒に変換
+                    }
                     if (currentData.remainingTime === undefined) {
                         currentData.remainingTime = currentData.config?.turnLimitTime || 30;
                     }
 
-                    if (currentData.remainingTime > 0) {
-                        currentData.remainingTime -= 1; 
+                    // 1. まずは「総持ち時間」を消費する
+                    if (p.timeStock > 0) {
+                        p.timeStock -= 1;
+                        currentData.timerMode = "stock"; // 状態：総持ち時間消費中
                     } else {
-                        let activePlayerId = currentData.turnOrder[currentData.currentTurnIdx];
-                        let pName = currentData.players[activePlayerId]?.name || activePlayerId;
-                        currentData.log = (currentData.log || "") + `⏰ タイムアップ！ ${pName} の制限時間が切れました。\n`;
-                        
-                        advanceTurn(currentData);
-                        currentData.remainingTime = currentData.config?.turnLimitTime || 30;
+                        // 2. 総持ち時間が切れたら「毎ターンの秒読み」を減らす
+                        currentData.timerMode = "byoyomi"; // 状態：秒読み中
+                        if (currentData.remainingTime > 0) {
+                            currentData.remainingTime -= 1;
+                        } else {
+                            // 🛑 秒読みも0秒になったらタイムアップ強制交代
+                            let pName = p.name || activePlayerId;
+                            currentData.log = (currentData.log || "") + `⏰ タイムアップ！ ${pName} の制限時間が切れました。\n`;
+                            
+                            advanceTurn(currentData);
+                            // 次の人のために秒読みタイマーを初期値に戻す
+                            currentData.remainingTime = currentData.config?.turnLimitTime || 30;
+                            currentData.timerMode = "stock"; 
+                        }
                     }
                     return currentData;
                 });
@@ -202,7 +222,8 @@
                 handLimitNum: parseInt(document.getElementById('cfg-hand-limit-num').value) || 150,
                 winScore: parseInt(document.getElementById('cfg-win-score').value) || 100,
                 maxTurns: parseInt(document.getElementById('cfg-max-turns').value) || 10,
-                turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30 
+                totalTimeStock: parseInt(document.getElementById('cfg-total-time-stock').value) || 5, // 総持ち時間（分）
+                turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30    // 秒読み（秒）
             };
 
             const initialData = {
@@ -213,7 +234,8 @@
                 turnOrder: [],
                 currentTurnIdx: 0,
                 remainingTime: config.turnLimitTime, 
-                log: "【システム】部屋が作成されました。カスタムルールが適用されています。\n",
+                timerMode: "stock", // 初期状態は持ち時間消費
+                log: "【システム】部屋が作成されました。将棋式タイマールールが適用されています。\n",
                 config: config,
                 players: {}
             };
@@ -238,7 +260,7 @@
                 const newId = "P" + (currentCount + 1);
                 myPlayerId = newId;
                 
-                const rule = currentData.config || { initHandCount: 5, initMaxNum: 10 };
+                const rule = currentData.config || { initHandCount: 5, initMaxNum: 10, totalTimeStock: 5 };
                 let randomHand = [];
                 for(let i = 0; i < rule.initHandCount; i++) {
                     randomHand.push(Math.floor(Math.random() * rule.initMaxNum) + 1);
@@ -247,7 +269,8 @@
                 currentData.players[newId] = {
                     name: `プレイヤー ${currentCount + 1}`,
                     score: 0,
-                    hand: randomHand
+                    hand: randomHand,
+                    timeStock: (rule.totalTimeStock || 5) * 60 // 各プレイヤー個別の持ち時間ストック
                 };
                 currentData.turnOrder.push(newId);
                 
@@ -286,6 +309,14 @@
             });
         }
 
+        // 秒を「分:秒」に変換する補助関数
+        function formatMinutesSeconds(totalSeconds) {
+            if (totalSeconds === undefined || isNaN(totalSeconds)) return "--:--";
+            const mins = Math.floor(totalSeconds / 60);
+            const secs = totalSeconds % 60;
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
         function updateDOM() {
             if (!gameState || !gameState.status) return;
 
@@ -296,14 +327,28 @@
             const activePlayerId = gameState.turnOrder ? gameState.turnOrder[gameState.currentTurnIdx] : null;
             const isMyTurn = (activePlayerId === myPlayerId && gameState.status === 'playing');
             
+            // ⏱️ タイマー表示表示の更新
+            const timerTitle = document.getElementById('timer-title');
             const timerBox = document.getElementById('timer-box');
-            if (timerBox) {
+            
+            if (timerBox && timerTitle) {
                 if (gameState.status === 'playing') {
-                    const time = gameState.remainingTime !== undefined ? gameState.remainingTime : '--';
-                    timerBox.innerText = `⏱️ 残り時間: ${time} 秒`;
-                    timerBox.style.color = time <= 5 ? '#ef4444' : '#b91c1c';
+                    const activeP = gameState.players[activePlayerId];
+                    const stockTime = activeP ? activeP.timeStock : 0;
+                    
+                    if (gameState.timerMode === "stock" && stockTime > 0) {
+                        timerTitle.innerText = `⏳ 現在の手番の総持ち時間`;
+                        timerBox.innerText = formatMinutesSeconds(stockTime);
+                        timerBox.style.color = '#2563eb'; // 持ち時間中は青
+                    } else {
+                        timerTitle.innerText = `🚨 持ち時間終了！秒読みモード`;
+                        const time = gameState.remainingTime !== undefined ? gameState.remainingTime : '--';
+                        timerBox.innerText = `${time} 秒`;
+                        timerBox.style.color = time <= 5 ? '#ef4444' : '#b91c1c'; // 残り5秒以下で赤
+                    }
                 } else {
-                    timerBox.innerText = `⏱️ タイマー停止中`;
+                    timerTitle.innerText = `⏱️ タイマー状態`;
+                    timerBox.innerText = `停止中`;
                     timerBox.style.color = '#64748b';
                 }
             }
@@ -313,9 +358,9 @@
                 const rBox = document.getElementById('rules-summary-box');
                 if(rBox) {
                     rBox.innerHTML = `
-                        ⚙️ <b>現在のルール:</b> 初期手札 ${c.initHandCount}枚(最大:${c.initMaxNum}) | 
-                        毎ターン ${c.drawCount}枚(最大:${c.drawMaxNum}) | 
-                        <b>上限: ${c.handLimitNum}</b> | 目標: ${c.winScore}pt | 最大: ${c.maxTurns}周 | ⏱️制限: ${c.turnLimitTime || 30}秒
+                        ⚙️ <b>現在のルール:</b> 初期 ${c.initHandCount}枚(最大:${c.initMaxNum}) | 
+                        ドロー ${c.drawCount}枚 | <b>手札上限: ${c.handLimitNum}</b> | 目標: ${c.winScore}pt <br>
+                        ⏱️<b>時間設定:</b> 総持ち時間: ${c.totalTimeStock}分 ➡ 切れたら 1手: ${c.turnLimitTime}秒
                     `;
                 }
             }
@@ -328,10 +373,14 @@
                     div.className = "player-status" + (pid === activePlayerId && gameState.status === 'playing' ? ' active-turn' : '') + (pid === myPlayerId ? ' my-status' : '');
                     
                     const handArr = targetHandArray(p.hand);
+                    const formattedStock = formatMinutesSeconds(p.timeStock);
                     
                     div.innerHTML = `
                         <div class="player-header">
-                            <div>👤 ${p.name} ${pid === myPlayerId ? '(あなた)' : ''}</div>
+                            <div>
+                                👤 ${p.name} ${pid === myPlayerId ? '(あなた)' : ''}
+                                <div class="player-time-stock">⏳ 残り持ち時間: <b>${formattedStock}</b></div>
+                            </div>
                             <div class="score-display">${p.score} pt</div>
                         </div>
                         <div class="mini-card-container">
@@ -399,6 +448,12 @@
             }
         }
 
+        function resetTurnTimerStock(currentData) {
+            // 手番が完了したら、次の人のために秒読みタイマーを既定値にリセット
+            currentData.remainingTime = currentData.config?.turnLimitTime || 30;
+            currentData.timerMode = "stock"; 
+        }
+
         function checkNumberLimit(resultValue) {
             if (!gameState || !gameState.config) return true;
             const limit = gameState.config.handLimitNum || 999;
@@ -461,8 +516,7 @@
                     currentData.log = (currentData.log || "") + `🏆👑【決着】${attackPlayerName} が目標の ${winTarget} 点に達したため勝者となりました！\n`;
                 }
                 
-                currentData.remainingTime = currentData.config?.turnLimitTime || 30;
-
+                resetTurnTimerStock(currentData);
                 return currentData;
             }).then(() => {
                 selectedIndices = [];
@@ -480,8 +534,7 @@
                 currentData.log = (currentData.log || "") + `🚪 ${pName} が行動を終了しました。\n`;
                 
                 advanceTurn(currentData);
-                currentData.remainingTime = currentData.config?.turnLimitTime || 30;
-
+                resetTurnTimerStock(currentData);
                 return currentData;
             }).then(() => {
                 selectedIndices = [];
@@ -531,7 +584,6 @@
             }, "操作A: 商×余", false, true);
         };
 
-        // 🔢 操作B: 桁和（分裂ロジック修正完了版）
         window.opDigitSumDiv = function() {
             if (!gameState || !gameState.status || gameState.status !== 'playing') return;
             let myHand = gameState.players && gameState.players[myPlayerId] ? targetHandArray(gameState.players[myPlayerId].hand) : [];
@@ -553,14 +605,12 @@
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 
-                // 元の1枚を消費
                 hand.splice(targetIdx, 1);
-                // 商を確実に手札に追加
                 hand.push(quotient);
                 
                 let logMsg = "";
                 if (remainder > 0) {
-                    hand.push(remainder); // 余りがあればそれも追加（2枚に分裂）
+                    hand.push(remainder); 
                     logMsg = `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] ➡ [${quotient}] と [${remainder}] の2枚に分裂！\n`;
                 } else {
                     logMsg = `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] ➡ 余りなしのため [${quotient}] に変換。\n`;
@@ -569,8 +619,7 @@
                 currentData.players[myPlayerId].hand = hand;
                 currentData.log = (currentData.log || "") + logMsg;
                 
-                currentData.remainingTime = currentData.config?.turnLimitTime || 30;
-
+                resetTurnTimerStock(currentData);
                 return currentData;
             }).then(() => { 
                 selectedIndices = []; 
@@ -613,8 +662,7 @@
                 currentData.players[myPlayerId].hand = hand;
                 currentData.log = (currentData.log || "") + `🔮 ${currentData.players[myPlayerId].name} が操作C(GCD): [${X}] と [${Y}] ➡ [${res}]\n`;
                 
-                currentData.remainingTime = currentData.config?.turnLimitTime || 30;
-
+                resetTurnTimerStock(currentData);
                 return currentData;
             }).then(() => { 
                 selectedIndices = []; 
@@ -650,8 +698,7 @@
                 currentData.players[myPlayerId].hand = hand;
                 currentData.log = (currentData.log || "") + `🔮 ${currentData.players[myPlayerId].name} が合成(${label}): ${n1} と ${n2} ➡ [${res}]\n`;
                 
-                currentData.remainingTime = currentData.config?.turnLimitTime || 30;
-
+                resetTurnTimerStock(currentData);
                 return currentData;
             }).then(() => { 
                 selectedIndices = []; 
@@ -702,8 +749,12 @@
                 <label>⑦ プレイできる最大ターン(周回)数</label>
                 <input type="number" id="cfg-max-turns" value="10" min="1" max="50">
             </div>
+            <div class="setting-item" style="background:#eff6ff; border-radius:4px; padding:4px;">
+                <label style="color:#1d4ed8; font-weight:bold;">⏳ プレイヤー毎の総持ち時間（分）</label>
+                <input type="number" id="cfg-total-time-stock" value="5" min="1" max="60">
+            </div>
             <div class="setting-item" style="background:#fff1f2; border-radius:4px; padding:4px;">
-                <label style="color:#b91c1c; font-weight:bold;">⏱️ 1ターンの制限時間（秒）</label>
+                <label style="color:#b91c1c; font-weight:bold;">🚨 持ち時間終了後の秒読み（秒）</label>
                 <input type="number" id="cfg-turn-limit-time" value="30" min="5" max="300">
             </div>
         </div>
@@ -727,7 +778,8 @@
         <div id="rules-summary-box" class="rules-summary">⚙️ ルール読み込み中...</div>
         
         <div class="timer-panel">
-            <div id="timer-box" class="timer-count">⏱️ 残り時間: -- 秒</div>
+            <div id="timer-title" class="timer-title">⏳ 残り時間</div>
+            <div id="timer-box" class="timer-count">--:--</div>
         </div>
 
         <div class="section-title">全プレイヤーの状況</div>
