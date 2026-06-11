@@ -237,7 +237,6 @@
             const turnInfo = document.getElementById('turn-info');
             if (turnInfo) {
                 if (isMyTurn) {
-                    // 最初の1周目（turnCount === 1）かどうかを視覚的に伝える
                     if (gameState.turnCount === 1) {
                         turnInfo.innerText = `★ あなたの番です (1周目: 🛑現在攻撃禁止期間)`;
                         turnInfo.style.color = "#f59e0b";
@@ -286,9 +285,7 @@
             }
         }
 
-        // ★【変更】攻撃処理
         window.executeAttack = function() {
-            // 仕様1: 1周目（turnCountが1）は全員攻撃不可
             if (gameState.turnCount === 1) {
                 return alert('【ルール】ゲームの最初の1周目（全員の1ターン目）は攻撃できません！合成などで手札を整えてください。');
             }
@@ -299,7 +296,6 @@
             let myIdx = selectedIndices[0];
             let attackNum = myHand[myIdx];
             
-            // 仕様2: 数字の「1」での攻撃は無効（ノーカン）
             if (attackNum === 1) {
                 return alert('【ルール】「1」で攻撃することはできません（1で割れてもノーカンです）。別の数字を使ってください。');
             }
@@ -317,7 +313,6 @@
                     
                     let keptCards = [];
                     targetHand.forEach(cardNum => {
-                        // 攻撃側の数字（attackNum）で割り切れるか判定
                         if (cardNum % attackNum === 0) {
                             totalGainedPoints += cardNum;
                             currentData.log += ` 🎯 ${currentData.players[pid].name} の [${cardNum}] を撃破！\n`;
@@ -334,14 +329,12 @@
                 currentData.players[myPlayerId].score += totalGainedPoints;
                 currentData.log += `⚔️ ${attackPlayerName} が [${attackNum}] で攻撃！ 計 ${totalGainedPoints} 点獲得！(ターンは継続します)\n`;
                 
-                // 仕様3: advanceTurn(currentData); を削除し、演算（合成）と同様にターンが終わらないように変更
                 return currentData;
             }).then(() => {
                 selectedIndices = [];
             });
         };
 
-        // 🚪 手動パスボタンを押した時だけ次のプレイヤーへターンを回す
         window.endTurn = function() {
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
@@ -384,11 +377,13 @@
             }, "操作A: 商×余", false, true);
         };
 
+        // ★【新仕様】操作B: 桁和 (1枚選択) ➡ 商と余りを独立した別々の数として手札に加える（分裂）
         window.opDigitSumDiv = function() {
             let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
             if (selectedIndices.length !== 1) return alert('手札を1枚選んでください');
             
             let num = myHand[selectedIndices[0]];
+            // 桁の合計を計算
             let sum = String(num).split('').reduce((s, d) => s + parseInt(d), 0);
             if (sum === 0) return alert('桁の和が0のため変換できません');
             
@@ -509,3 +504,4 @@
 </div>
 </body>
 </html>
+           
