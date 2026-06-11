@@ -35,12 +35,20 @@
         .hand-container { display: flex; flex-wrap: wrap; gap: 8px; min-height: 60px; background: #eff6ff; border: 2px dashed #bfdbfe; border-radius: 12px; padding: 10px; margin-bottom: 15px; align-items: center; }
         .card { background: white; border: 2px solid var(--primary); color: var(--primary); padding: 8px 14px; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; user-select: none; transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         .card.selected { background: var(--primary); color: white; box-shadow: 0 0 10px rgba(37,99,235,0.4); }
+        
+        /* 🛠️ コマンドエリアとボタンのスタイル改善 */
         .actions-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 15px; }
-        button { padding: 10px; border: none; border-radius: 8px; font-size: 13px; font-weight: bold; cursor: pointer; background: #e2e8f0; color: #334155; }
-        button:disabled { background: #cbd5e1 !important; color: #94a3b8 !important; cursor: not-allowed; }
+        button { padding: 12px; border: none; border-radius: 8px; font-size: 13px; font-weight: bold; cursor: pointer; transition: all 0.2s; }
+        
+        /* 自分のターンで有効なボタンの色をハッキリさせる */
+        .btn-attack { grid-column: span 2; background: #10b981; color: white; font-size: 15px; }
         .btn-main { grid-column: span 2; background: #7c3aed; color: white; font-size: 14px; }
-        .btn-attack { grid-column: span 2; background: linear-gradient(135deg, #10b981, #059669); color: white; font-size: 15px; }
-        .btn-op { background: #f1f5f9; border: 1px solid var(--border); }
+        .btn-op { background: #3b82f6; color: white; } /* 演算ボタンを認識しやすい青色に変更 */
+        .btn-op-special { grid-column: span 2; background: #f472b6; color: white; } /* 操作Cをピンクに */
+        
+        /* 相手のターン（無効化時）の見た目を完全に固定 */
+        button:disabled { background: #cbd5e1 !important; color: #94a3b8 !important; cursor: not-allowed; box-shadow: none !important; opacity: 0.6; }
+        
         .log-container { background: #1e293b; color: #f8fafc; padding: 10px; border-radius: 8px; height: 120px; overflow-y: auto; font-family: monospace; font-size: 12px; line-height: 1.5; }
         .url-box { background: #e0f2fe; border: 1px solid #bae6fd; padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 15px; word-break: break-all; }
         .waiting-screen { text-align: center; padding: 30px; background: #f1f5f9; border-radius: 12px; margin-bottom: 15px; }
@@ -294,7 +302,7 @@
                 }
             }
 
-            // 【超重要バグ修正】ゲーム画面が表示されている時だけボタンの有効・無効化を切り替える（エラー防止ガード）
+            // ボタンの有効・無効を確実に現在のターンに連動させるガード
             if (document.getElementById('game-screen').style.display !== 'none') {
                 document.querySelectorAll('.actions-grid button').forEach(btn => { 
                     btn.disabled = !isMyTurn; 
@@ -449,7 +457,7 @@
         }
 
         // ==========================================
-        // 🔮 数理特殊変換・合成コマンド群
+        // 🔮 数理特殊変換・合成コマンド群 (インデックスズレ完全修正版)
         // ==========================================
         window.opAdd = function() { executeOp((a, b) => a + b, "➕ 足し算"); };
         window.opSub = function() { executeOp((a, b) => a - b, "➖ 引き算", true); };
@@ -483,6 +491,7 @@
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 
+                // 正確に選んだ1枚を消去して新しい値をプッシュ
                 hand.splice(targetIdx, 1);
                 hand.push(quotient);
                 
@@ -526,11 +535,14 @@
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 
-                let firstIdx = Math.min(selectedIndices[0], selectedIndices[1]);
-                let secondIdx = Math.max(selectedIndices[0], secondIndices[1]);
+                let val1 = myHand[selectedIndices[0]];
+                let val2 = myHand[selectedIndices[1]];
                 
-                hand.splice(secondIdx, 1);
-                hand.splice(firstIdx, 1);
+                // 値を基準に配列から2枚を確実に取り除く（インデックスの狂いを防止）
+                let idx1 = hand.indexOf(val1);
+                if(idx1 !== -1) hand.splice(idx1, 1);
+                let idx2 = hand.indexOf(val2);
+                if(idx2 !== -1) hand.splice(idx2, 1);
                 
                 hand.push(res);
                 currentData.players[myPlayerId].hand = hand;
@@ -547,9 +559,6 @@
             let myHand = gameState.players && gameState.players[myPlayerId] ? targetHandArray(gameState.players[myPlayerId].hand) : [];
             if (selectedIndices.length !== 2) return alert('手札を2枚選んでください');
             
-            let firstIdx = Math.min(selectedIndices[0], selectedIndices[1]);
-            let secondIdx = Math.max(selectedIndices[0], secondIndices[1]);
-            
             let n1 = myHand[selectedIndices[0]];
             let n2 = myHand[selectedIndices[1]];
             if (n1 === undefined || n2 === undefined) return;
@@ -564,8 +573,11 @@
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 
-                hand.splice(secondIdx, 1);
-                hand.splice(firstIdx, 1);
+                // インデックスの狂いを完全に防止するため、選択された「実際の数値」を探して1枚ずつ綺麗に消去する処理に改善
+                let idx1 = hand.indexOf(n1);
+                if(idx1 !== -1) hand.splice(idx1, 1);
+                let idx2 = hand.indexOf(n2);
+                if(idx2 !== -1) hand.splice(idx2, 1);
                 
                 hand.push(res);
                 currentData.players[myPlayerId].hand = hand;
@@ -602,7 +614,7 @@
             </div>
             <div class="setting-item">
                 <label>③ 毎ターンカードを引く枚数</label>
-                <input type="number" id="cfg-draw-count" value="1" min="0" max="5">
+                <input type="number" id="cfg-draw-count" value="2" min="0" max="5">
             </div>
             <div class="setting-item">
                 <label>④ 後から引く数の大きさ上限</label>
@@ -654,7 +666,7 @@
             <button class="btn-op" onclick="opSub()">➖ 引き算 (2枚選択)</button>
             <button class="btn-op" onclick="opDivProduct()">🧩 操作A: 商×余 (2枚選択)</button>
             <button class="btn-op" onclick="opDigitSumDiv()">🔢 操作B: 桁和で2枚に分裂 (1枚選択)</button>
-            <button class="btn-op" style="grid-column: span 2; background: #faf5ff;" onclick="opGcdMul()">🔮 操作C: 最大公約数を掛ける (2枚選択)</button>
+            <button class="btn-op-special" onclick="opGcdMul()">🔮 操作C: 最大公約数を掛ける (2枚選択)</button>
         </div>
         
         <div class="section-title">バトルログ</div>
