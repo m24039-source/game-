@@ -58,7 +58,9 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, set, onValue, update, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
-        
+
+        import { executeCPUTurn } from "./cpu-ai.js"; 
+       
         const firebaseConfig = { 
             databaseURL: "https://math-tactics-default-rtdb.firebaseio.com/" 
         };
@@ -349,128 +351,8 @@
             });
         }
 
-        // 🤖 CPUの手番の自動思考演算ロジック
-        function executeCPUTurn(cpuId) {
-            runTransaction(roomRef, (currentData) => {
-                if (!currentData || currentData.status !== 'playing') return currentData;
-                
-                // 1. ターン開始ドローを自動処理 (1周目以外)
-                if (currentData.absoluteTurnIdx > 0) {
-                    const rule = currentData.config || { drawCount: 2, drawMaxNum: 20 };
-                    let cpuHand = targetHandArray(currentData.players[cpuId].hand);
-                    let drawnNums = [];
-                    for(let i = 0; i < rule.drawCount; i++) {
-                        let drawn = Math.floor(Math.random() * rule.drawMaxNum) + 1;
-                        cpuHand.push(drawn);
-                        drawnNums.push(`[${drawn}]`);
-                    }
-                    currentData.players[cpuId].hand = cpuHand;
-                    currentData.log = (currentData.log || "") + `📥 📥 AIドロー: ${currentData.players[cpuId].name} が ${drawnNums.join(', ')} を引きました。\n`;
-                }
-
-                let cpuHand = targetHandArray(currentData.players[cpuId].hand);
-                let limit = currentData.config?.handLimitNum || 150;
-                let isFirstRound = (currentData.turnCount === 1);
-
-                let bestAction = { type: "pass", score: -1, cardIdx: -1, card1Idx: -1, card2Idx: -1, resVal: -1, opLabel: "" };
-
-                // 2. 攻撃パターンの全探索 (1周目でなければ実行)
-                if (!isFirstRound) {
-                    for (let i = 0; i < cpuHand.length; i++) {
-                        let attackNum = cpuHand[i];
-                        if (attackNum === 1) continue; // 1での攻撃は禁止
-
-                        let totalGained = 0;
-                        Object.keys(currentData.players).forEach(pid => {
-                            if (pid === cpuId) return;
-                            let targetHand = targetHandArray(currentData.players[pid].hand);
-                            targetHand.forEach(cardNum => {
-                                if (cardNum % attackNum === 0) totalGained += cardNum;
-                            });
-                        });
-
-                        if (totalGained > 0 && totalGained > bestAction.score) {
-                            bestAction = { type: "attack", score: totalGained, cardIdx: i, value: attackNum };
-                        }
-                    }
-                }
-
-                // 3. 攻撃手段がない場合、合成(足し算・引き算・操作A)を全探索して最も大きな数字が作れるペアを探す
-                if (bestAction.type === "pass" && cpuHand.length >= 2) {
-                    for (let i = 0; i < cpuHand.length; i++) {
-                        for (let j = 0; j < cpuHand.length; j++) {
-                            if (i === j) continue;
-                            let n1 = cpuHand[i];
-                            let n2 = cpuHand[j];
-
-                            // 足し算
-                            let addRes = n1 + n2;
-                            if (addRes <= limit && addRes > bestAction.resVal) {
-                                bestAction = { type: "op", card1Idx: i, card2Idx: j, resVal: addRes, opLabel: "➕ 足し算" };
-                            }
-                            // 引き算
-                            let subRes = n1 - n2;
-                            if (subRes > 0 && subRes > bestAction.resVal) {
-                                bestAction = { type: "op", card1Idx: i, card2Idx: j, resVal: subRes, opLabel: "➖ 引き算" };
-                            }
-                            // 操作A (商×余)
-                            if (n2 !== 0) {
-                                let opARes = Math.floor(n1 / n2) * (n1 % n2);
-                                if (opARes <= limit && opARes > bestAction.resVal) {
-                                    bestAction = { type: "op", card1Idx: i, card2Idx: j, resVal: opARes, opLabel: "🧩 操作A: 商×余" };
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 4. 割り出した最善手を実際に反映
-                if (bestAction.type === "attack") {
-                    let attackNum = bestAction.value;
-                    Object.keys(currentData.players).forEach(pid => {
-                        if (pid === cpuId) return;
-                        let targetHand = targetHandArray(currentData.players[pid].hand);
-                        let kept = [];
-                        targetHand.forEach(cardNum => {
-                            if (cardNum % attackNum === 0) {
-                                currentData.log = (currentData.log || "") + ` 🎯 ${currentData.players[pid].name} の [${cardNum}] を撃破！\n`;
-                            } else {
-                                kept.push(cardNum);
-                            }
-                        });
-                        currentData.players[pid].hand = kept;
-                    });
-                    cpuHand.splice(bestAction.cardIdx, 1);
-                    currentData.players[cpuId].hand = cpuHand;
-                    currentData.players[cpuId].score += bestAction.score;
-                    currentData.log = (currentData.log || "") + `⚔️ ${currentData.players[cpuId].name} が [${attackNum}] で最適攻撃を仕掛け、 ${bestAction.score} 点強奪！\n`;
-                    
-                    const winTarget = currentData.config?.winScore || 100;
-                    if (currentData.players[cpuId].score >= winTarget) {
-                        currentData.status = 'finished';
-                        currentData.log = (currentData.log || "") + `🏆👑【決着】AIが目標点に達したため勝利しました！\n`;
-                    }
-                } else if (bestAction.type === "op") {
-                    let v1 = cpuHand[bestAction.card1Idx];
-                    let v2 = cpuHand[bestAction.card2Idx];
-                    
-                    // 手札から2つの値を削除
-                    let idx1 = cpuHand.indexOf(v1); if(idx1 !== -1) cpuHand.splice(idx1, 1);
-                    let idx2 = cpuHand.indexOf(v2); if(idx2 !== -1) cpuHand.splice(idx2, 1);
-                    
-                    cpuHand.push(bestAction.resVal);
-                    currentData.players[cpuId].hand = cpuHand;
-                    currentData.log = (currentData.log || "") + `🔮 ${currentData.players[cpuId].name} は自動演算を判断: ${bestAction.opLabel} で [${v1}] と [${v2}] ➡ [${bestAction.resVal}] を合成。\n`;
-                } else {
-                    currentData.log = (currentData.log || "") + `💤 ${currentData.players[cpuId].name} は有効な手がなくパスしました。\n`;
-                }
-
-                // AI手番終了、次へ進む
-                advanceTurn(currentData);
-                resetTurnTimerStock(currentData);
-                return currentData;
-            });
-        }
+       
+              
 
         function formatMinutesSeconds(totalSeconds) {
             if (totalSeconds === undefined || isNaN(totalSeconds)) return "--:--";
