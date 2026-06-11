@@ -1,6 +1,6 @@
 // ==========================================
 // 数理変換タクティクス：CPU（AI）思考エンジン
-// 【Google Colab・Python育成モデル 逆輸入版】
+// 【GitHub Pages パス完全固定版】
 // ==========================================
 import { runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
@@ -8,22 +8,24 @@ import { runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/fireba
 let aiNeuralModel = null;
 
 /**
- * 📥 1. Colabで育てた最強の脳みそ（model.json）を読み込む
+ * 📥 1. Colabで育てた最強の脳みそ（model.json）を絶対パスで読み込む
  */
 export async function loadBrain() {
     try {
-        // 同じフォルダ階層にある tfjs_model/model.json をロード
-         console.log("🧠 [AI] Google Colabで鍛え上げた最強の脳みそを正常にロードしました！");
+        // 🚨 あなたのGitHub Pagesの絶対URLを直接指定して、404エラーを完全に回避します
+        const modelUrl = 'https://m24039-source.github.io/game-/tfjs_model/model.json';
+        
+        aiNeuralModel = await tf.loadLayersModel(modelUrl);
+        console.log("🧠 [AI] Google Colabで鍛え上げた最強の脳みそを正常にロードしました！");
         return true;
     } catch (error) {
-        console.error("⚠️ [AI] モデルのロードに失敗しました。ファイルが配置されているか確認してください:", error);
+        console.error("⚠️ [AI] モデルのロードに失敗しました:", error);
         return false;
     }
 }
 
 /**
  * 📊 2. 盤面データをAIが理解できる数値の配列（30要素）に正規化
- * (Python側の convert_state_to_vector と完全にロジックを一致させています)
  */
 function convertStateToVector(currentData, cpuId) {
     const vector = new Array(30).fill(0);
@@ -51,11 +53,10 @@ function convertStateToVector(currentData, cpuId) {
  * 🤖 3. コラボーレーション型 CPU自動思考ロジック本体
  */
 export function executeCPUTurn(roomRef, cpuId) {
-    // もし脳みそがまだ読み込まれていなければ、自動でロードを試みる
     if (!aiNeuralModel) {
         loadBrain().then(success => {
             if (!success) {
-                console.log("💤 AIの脳みそファイルが見つからないため、パス（手動初期化待ち）します。");
+                console.log("💤 AIの脳みそファイルが見つからないため、パスします。");
                 return;
             }
         });
@@ -191,7 +192,6 @@ export function executeCPUTurn(roomRef, cpuId) {
     });
 }
 
-// 共通ヘルパー関数
 function targetHandArray(handData) {
     if (!handData) return [];
     if (Array.isArray(handData)) return handData;
