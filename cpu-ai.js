@@ -1,18 +1,23 @@
 // ==========================================
 // 数理変換タクティクス：CPU（AI）思考エンジン
-// 【最強脳みそデータ直接埋め込み・最終安定版】
+// 【Firebase同期ループ完全分離・最終確定版】
 // ==========================================
 import { runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
 // AIの脳みそ（ニューラルネットワークモデル）を保持する変数
 let aiNeuralModel = null;
+let isModelLoading = false; // 二重ロードを防ぐフラグ
 
 /**
- * 📥 1. 脳みその構造データを直接読み込む
+ * 📥 1. 脳みその構造データをメモリ上に直接展開する（超高速・404回避）
  */
 export async function loadBrain() {
+    if (aiNeuralModel) return true; // すでにロード済みの場合はスキップ
+    if (isModelLoading) return false;
+    
+    isModelLoading = true;
     try {
-        // 先ほど提示していただいた正しいmodel.jsonのデータを直接変数に格納します
+        // あなたの正しいmodel.json構造を直接定義
         const modelJsonData = {
             "format": "layers-model", 
             "generatedBy": "keras v3.13.2", 
@@ -36,6 +41,7 @@ export async function loadBrain() {
                 }
             }, 
             "weightsManifest": [{
+                // バイナリファイルだけはGitHubの絶対パスから一本釣り
                 "paths": ["https://m24039-source.github.io/game-/tfjs_model/group1-shard1of1.bin"], 
                 "weights": [
                     {"name": "sequential/dense/kernel", "shape": [30, 64], "dtype": "float32"}, 
@@ -48,17 +54,18 @@ export async function loadBrain() {
             }]
         };
         
-        // ファイル経由ではなく、上記のデータから直接TensorFlow.jsのモデルを復元
+        // メモリ上でモデルを安全に復元
         aiNeuralModel = await tf.loadLayersModel(tf.io.fromMemory(
             modelJsonData.modelTopology,
             modelJsonData.weightsManifest
         ));
 
-        console.log("🧠 [AI] 埋め込み脳みそのロードに成功しました！");
+        console.log("🧠 [AI] 思考エンジンの初期化に完全成功しました！");
+        isModelLoading = false;
         return true;
     } catch (error) {
-        console.error("⚠️ [AI] 脳みその復元に失敗しました:", error);
-        alert("🚨 エラー詳細:\n" + error.message);
+        console.error("⚠️ [AI] モデルの復元に失敗:", error);
+        isModelLoading = false;
         return false;
     }
 }
@@ -89,15 +96,18 @@ function convertStateToVector(currentData, cpuId) {
 }
 
 /**
- * 🤖 3. コラボーレーション型 CPU自動思考ロジック本体
+ * 🤖 3. CPU自動思考ロジック本体（Firebase同期からロード処理を徹底隔離）
  */
 export function executeCPUTurn(roomRef, cpuId) {
+    // 🚨 修正のキモ：もし脳みそが未ロードなら、ここでは非同期ロードを「呼ばずに」単に即時ロード命令を裏で投げて終了する
+    // Firebaseのトランザクション内で await させないための絶対防御策です
     if (!aiNeuralModel) {
-        loadBrain().then(success => {
-            if (!success) return;
-        });
+        loadBrain(); 
+        console.log("💤 AIの脳みそが準備中のため、この手番は安全にスキップします。");
+        return;
     }
 
+    // AIモデルが確実に存在する状態でのみ、安全に同期処理を開始
     runTransaction(roomRef, (currentData) => {
         if (!currentData || currentData.status !== 'playing') return currentData;
         
@@ -126,13 +136,11 @@ export function executeCPUTurn(roomRef, cpuId) {
         const stateVector = convertStateToVector(currentData, cpuId);
         let predictedActionCategory = 0; 
         
-        if (aiNeuralModel) {
-            tf.tidy(() => {
-                const inputTensor = tf.tensor2d([stateVector]);
-                const prediction = aiNeuralModel.predict(inputTensor);
-                predictedActionCategory = prediction.argMax(-1).dataSync()[0];
-            });
-        }
+        tf.tidy(() => {
+            const inputTensor = tf.tensor2d([stateVector]);
+            const prediction = aiNeuralModel.predict(inputTensor);
+            predictedActionCategory = prediction.argMax(-1).dataSync()[0];
+        });
 
         // 最善手決定用変数
         let bestAction = { type: "pass", score: -1, cardIdx: -1, card1Idx: -1, card2Idx: -1, resVal: -1, opLabel: "" };
