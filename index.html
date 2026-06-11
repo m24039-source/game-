@@ -3,22 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>数理変換タクティクス - デバッグ機能付き</title>
+    <title>数理変換タクティクス - デバッグ完了版</title>
     <style>
         :root { --primary: #2563eb; --success: #10b981; --danger: #ef4444; --bg: #f8fafc; --card-bg: #ffffff; --text: #1e293b; --border: #e2e8f0; }
         body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 10px; display: flex; justify-content: center; }
         .game-container { max-width: 100%; width: 100%; background: var(--card-bg); border-radius: 16px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); padding: 16px; box-sizing: border-box; }
         h1 { text-align: center; font-size: 20px; margin-top: 0; color: #0f172a; }
         
-        /* 🛠️ デバッグ用特別スタイル */
-        .debug-panel { background: #fee2e2; border: 2px dashed #f87171; color: #991b1b; padding: 12px; border-radius: 8px; margin-bottom: 15px; font-size: 13px; font-family: monospace; }
+        .debug-panel { background: #f0fdf4; border: 2px dashed #4ade80; color: #166534; padding: 12px; border-radius: 8px; margin-bottom: 15px; font-size: 13px; font-family: monospace; }
         .status-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-weight: bold; color: white; font-size: 11px; margin-bottom: 5px; }
         .status-loading { background: #64748b; }
         .status-success { background: #10b981; }
         .status-error { background: #ef4444; }
 
         .setup-panel { background: #f1f5f9; padding: 15px; border-radius: 12px; text-align: center; margin-bottom: 15px; }
-        .room-select { margin-bottom: 15px; padding: 10px; background: #e0f2fe; border-radius: 8px; font-weight: bold; }
         .pvp-board { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 15px; }
         .player-status { padding: 12px; border-radius: 8px; border: 2px solid transparent; background: #f8fafc; border-color: var(--border); transition: all 0.3s; }
         .active-turn { box-shadow: 0 0 12px rgba(37,99,235,0.6); border-color: var(--primary) !important; background: #eff6ff; }
@@ -45,7 +43,6 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, set, onValue, update, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
         
-        // 宛先URL
         const firebaseConfig = { 
             databaseURL: "https://math-tactics-default-rtdb.firebaseio.com/" 
         };
@@ -53,31 +50,29 @@
         let db, roomRef, roomId = window.location.hash.substring(1);
         if (!roomId) { roomId = "room_" + Math.random().toString(36).substring(2, 11); window.location.hash = roomId; }
         
+        const app = initializeApp(firebaseConfig);
+        db = getDatabase(app);
+        roomRef = ref(db, 'rooms/' + roomId);
+        
         function setDebugStatus(status, text) {
             const badge = document.getElementById('debug-badge');
             const detail = document.getElementById('debug-detail');
-            badge.className = "status-badge status-" + status;
-            badge.innerText = status === 'success' ? '🟢 接続成功' : (status === 'error' ? '🔴 接続エラー' : '🟡 通信中...');
-            detail.innerText = text;
+            if(badge && detail) {
+                badge.className = "status-badge status-" + status;
+                badge.innerText = status === 'success' ? '🟢 接続成功' : (status === 'error' ? '🔴 エラー' : '🟡 通信中...');
+                detail.innerText = text;
+            }
         }
 
-        try {
-            const app = initializeApp(firebaseConfig);
-            db = getDatabase(app);
-            roomRef = ref(db, 'rooms/' + roomId);
-            
-            // 📡 接続テスト用：Firebaseの特殊な接続状況監視ノード
-            const connectedRef = ref(db, ".info/connected");
-            onValue(connectedRef, (snap) => {
-                if (snap.val() === true) {
-                    setDebugStatus('success', `Firebaseサーバーに正常に直結しました。部屋ID: ${roomId}`);
-                } else {
-                    setDebugStatus('loading', "Firebaseサーバーを探しています。URLが間違っているか、オフラインです...");
-                }
-            });
-        } catch (e) {
-            setDebugStatus('error', `初期化失敗(コード記述ミス等): ${e.message}`);
-        }
+        // 接続監視
+        const connectedRef = ref(db, ".info/connected");
+        onValue(connectedRef, (snap) => {
+            if (snap.val() === true) {
+                setDebugStatus('success', `Firebaseサーバーに正常接続中。部屋ID: ${roomId}`);
+            } else {
+                setDebugStatus('loading', "接続テスト中...");
+            }
+        });
         
         let gameState = {};
         let myPlayerId = null; 
@@ -87,7 +82,6 @@
             document.getElementById('invite-url').innerText = window.location.href; 
         });
 
-        // データベース監視（エラーキャッチ付きに強化）
         onValue(roomRef, (snapshot) => {
             const data = snapshot.val();
             if (!data) {
@@ -99,7 +93,6 @@
             
             gameState = data;
             document.getElementById('room-setup').style.display = 'none';
-            
             const currentPlayersCount = gameState.players ? Object.keys(gameState.players).length : 0;
             
             if (gameState.status === 'waiting') {
@@ -119,8 +112,7 @@
                 if (myPlayerId) updateDOM();
             }
         }, (error) => {
-            // 🚨 重要：ルール（true/false）で弾かれた場合はここに通知が来ます！
-            setDebugStatus('error', `Firebaseから通信が拒否されました(ルール設定ミスの可能性): ${error.message}`);
+            setDebugStatus('error', `通信拒否: ${error.message}`);
         });
 
         window.createRoom = function(maxPlayers) {
@@ -146,8 +138,9 @@
                 if (currentData.status !== 'waiting') return;
                 
                 if (!currentData.players) currentData.players = {};
-                const currentCount = Object.keys(currentData.players).length;
+                if (!currentData.turnOrder) currentData.turnOrder = [];
                 
+                const currentCount = Object.keys(currentData.players).length;
                 if (currentCount >= currentData.maxPlayers) return;
                 
                 const newId = "P" + (currentCount + 1);
@@ -169,12 +162,13 @@
                 
                 return currentData;
             }).catch(err => {
-                alert(`入室エラー(書き込み権限なし等): ${err.message}`);
+                alert(`入室エラー: ${err.message}`);
             });
         };
 
         function updateDOM() {
             const board = document.getElementById('pvp-board');
+            if(!board) return;
             board.innerHTML = '';
             
             const activePlayerId = gameState.turnOrder[gameState.currentTurnIdx];
@@ -182,6 +176,7 @@
             
             gameState.turnOrder.forEach(pid => {
                 const p = gameState.players[pid];
+                if(!p) return;
                 const div = document.createElement('div');
                 div.className = "player-status" + (pid === activePlayerId ? ' active-turn' : '') + (pid === myPlayerId ? ' my-status' : '');
                 
@@ -200,44 +195,49 @@
             });
 
             const turnInfo = document.getElementById('turn-info');
-            if (isMyTurn) {
-                turnInfo.innerText = `★ あなたの番です (ターン数: ${gameState.turnCount})`;
-                turnInfo.style.color = "var(--primary)";
-            } else {
-                const activeName = gameState.players[activePlayerId]?.name || activePlayerId;
-                turnInfo.innerText = `${activeName} の番です。待機中...`;
-                turnInfo.style.color = "#64748b";
+            if (turnInfo) {
+                if (isMyTurn) {
+                    turnInfo.innerText = `★ あなたの番です (ターン数: ${gameState.turnCount})`;
+                    turnInfo.style.color = "var(--primary)";
+                } else {
+                    const activeName = gameState.players[activePlayerId]?.name || activePlayerId;
+                    turnInfo.innerText = `${activeName} の番です。待機中...`;
+                    turnInfo.style.color = "#64748b";
+                }
             }
 
             document.querySelectorAll('.actions-grid button').forEach(btn => { btn.disabled = !isMyTurn; });
 
             const myHandArr = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
             const handArea = document.getElementById('hand-area'); 
-            handArea.innerHTML = '';
-            
-            if (myHandArr.length === 0) { 
-                handArea.innerHTML = '<span style="color:#2563eb; font-size:12px;">手札なし</span>'; 
-            } else {
-                myHandArr.forEach((num, index) => {
-                    const div = document.createElement('div'); 
-                    div.className = 'card' + (selectedIndices.includes(index) ? ' selected' : ''); 
-                    div.innerText = num;
-                    div.onclick = () => { 
-                        if (!isMyTurn) return; 
-                        if (selectedIndices.includes(index)) { 
-                            selectedIndices = selectedIndices.filter(i => i !== index); 
-                        } else { 
-                            selectedIndices.push(index); 
-                        } 
-                        updateDOM(); 
-                    };
-                    handArea.appendChild(div);
-                });
+            if(handArea) {
+                handArea.innerHTML = '';
+                if (myHandArr.length === 0) { 
+                    handArea.innerHTML = '<span style="color:#2563eb; font-size:12px;">手札なし</span>'; 
+                } else {
+                    myHandArr.forEach((num, index) => {
+                        const div = document.createElement('div'); 
+                        div.className = 'card' + (selectedIndices.includes(index) ? ' selected' : ''); 
+                        div.innerText = num;
+                        div.onclick = () => { 
+                            if (!isMyTurn) return; 
+                            if (selectedIndices.includes(index)) { 
+                                selectedIndices = selectedIndices.filter(i => i !== index); 
+                            } else { 
+                                selectedIndices.push(index); 
+                            } 
+                            updateDOM(); 
+                        };
+                        handArea.appendChild(div);
+                    });
+                }
             }
 
             const logArea = document.getElementById('log-area'); 
-            logArea.innerText = gameState.log; 
-            logArea.scrollTop = logArea.scrollHeight;
+            if(logArea) {
+                logArea.innerText = gameState.log; 
+                logArea.scrollTop = logArea.scrollHeight;
+            }
         }
 
         window.executeAttack = function() {
@@ -274,11 +274,12 @@
                 updatedMyHand.splice(myIdx, 1);
                 currentData.players[myPlayerId].hand = updatedMyHand;
                 currentData.players[myPlayerId].score += totalGainedPoints;
-                
                 currentData.log += `⚔️ ${attackPlayerName} が [${attackNum}] で攻撃！ 計 ${totalGainedPoints} 点獲得！\n`;
                 
                 advanceTurn(currentData);
                 return currentData;
+            }).then(() => {
+                selectedIndices = [];
             });
         };
 
@@ -298,6 +299,8 @@
                 
                 advanceTurn(currentData);
                 return currentData;
+            }).then(() => {
+                selectedIndices = [];
             });
         };
 
@@ -333,7 +336,7 @@
                 currentData.players[myPlayerId].hand = hand;
                 currentData.log += `🔮 ${currentData.players[myPlayerId].name} が合成: ${n1} と ${n2} ➡ [${res}]\n`;
                 return currentData;
-            });
+            }).then(() => { selectedIndices = []; });
         }
 
         window.resetRoom = function() { if(confirm("部屋をリセットしますか？")) { set(roomRef, null); location.reload(); } };
@@ -341,12 +344,11 @@
 </head>
 <body>
 <div class="game-container">
-    <h1>数理変換タクティクス (デバッグモード)</h1>
+    <h1>数理変換タクティクス</h1>
     
     <div class="debug-panel">
-        <div><b>📡 リアルタイム接続テスト:</b></div>
-        <span id="debug-badge" class="status-badge status-loading">🟡 通信中...</span>
-        <div id="debug-detail" style="margin-top:5px; color:#555;">接続をテストしています...</div>
+        <span id="debug-badge" class="status-badge status-loading">接続確認中...</span>
+        <div id="debug-detail" style="margin-top:5px; color:#555;">通信状況をテストしています。</div>
     </div>
     
     <div id="room-setup" class="setup-panel" style="display:none;">
@@ -369,10 +371,19 @@
         <div class="section-title">全プレイヤーの状況</div>
         <div class="pvp-board" id="pvp-board"></div>
         <div id="turn-info" style="text-align: center; font-weight: bold; margin-bottom: 15px;"></div>
+        <div class="section-title">あなたの手札</div
+        <div class="hand-container" id="hand-area"></div>
+        <div class="section-title">コマンド</div>
+        <div class="actions-grid">
+            <button class="btn-attack" onclick="executeAttack()">⚔️ 選択したカードの約数を相手全員から強奪！</button>
+            <button class="btn-main" onclick="endTurn()">🚪 パスして1枚ドロー（ターンを渡す）</button>
+            <button class="btn-op" onclick="opAdd()">➕ 足し算 (2枚選択)</button>
+            <button class="btn-op" onclick="opSub()">➖ 引き算 (2枚選択)</button>
+        </div>
         <div class="section-title">バトルログ</div>
         <div class="log-container" id="log-area"></div>
         <button onclick="resetRoom()" style="margin-top: 15px; width: 100%; background: #64748b; color: white;">🔄 試合を完全にリセット</button>
     </div>
 </div>
 </body>
-</html>
+</html>                 
