@@ -13,9 +13,7 @@ let aiNeuralModel = null;
 export async function loadBrain() {
     try {
         // 同じフォルダ階層にある tfjs_model/model.json をロード
-        aiNeuralModel = await tf.loadLayersModel('/game-/tfjs_model/model.json');
-        
-        console.log("🧠 [AI] Google Colabで鍛え上げた最強の脳みそを正常にロードしました！");
+         console.log("🧠 [AI] Google Colabで鍛え上げた最強の脳みそを正常にロードしました！");
         return true;
     } catch (error) {
         console.error("⚠️ [AI] モデルのロードに失敗しました。ファイルが配置されているか確認してください:", error);
