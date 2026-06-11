@@ -16,7 +16,6 @@
         .status-success { background: #10b981; }
         .status-error { background: #ef4444; }
 
-        /* ⏱️ タイマー表示の専用スタイル */
         .timer-panel { background: #fff1f2; border: 2px solid #fecdd3; padding: 10px; border-radius: 12px; text-align: center; margin-bottom: 15px; }
         .timer-count { font-size: 28px; font-weight: bold; color: var(--danger); font-family: monospace; }
 
@@ -92,7 +91,7 @@
         let myPlayerId = null; 
         let selectedIndices = [];
         let currentProcessedTurnIdx = -1; 
-        let timerInterval = null; // ホスト用タイマー監視ループ
+        let timerInterval = null; 
 
         window.addEventListener('DOMContentLoaded', () => { 
             document.getElementById('invite-url').innerText = window.location.href; 
@@ -129,26 +128,27 @@
                 document.getElementById('waiting-screen').style.display = 'none';
                 document.getElementById('game-screen').style.display = 'block';
                 
-                if (myPlayerId && gameState.status === 'playing') {
-                    const activePlayerId = gameState.turnOrder ? gameState.turnOrder[gameState.currentTurnIdx] : null;
-                    
-                    if (activePlayerId === myPlayerId && gameState.absoluteTurnIdx !== currentProcessedTurnIdx) {
-                        currentProcessedTurnIdx = gameState.absoluteTurnIdx; 
-                        
-                        if (gameState.absoluteTurnIdx === 0) {
-                            runTransaction(roomRef, (currentData) => {
-                                if (!currentData) return currentData;
-                                currentData.log = (currentData.log || "") + `🏁 ゲームスタート！先攻の1ターン目はドローなし＆全員1周目は攻撃禁止です。\n`;
-                                return currentData;
-                            });
-                        } else {
-                            triggerStartTurnDraw();
-                        }
-                    }
-
-                    // 🛠️ ホスト（部屋を立てたP1）だけが時間をカウントダウンする処理を開始
+                if (gameState.status === 'playing') {
+                    // 【修正】myPlayerId の有無に関わらず、同期データに基づいてP1端末であればタイマーを常時稼働監視する設計に変更
                     if (myPlayerId === 'P1') {
                         startHostTimer();
+                    }
+
+                    if (myPlayerId) {
+                        const activePlayerId = gameState.turnOrder ? gameState.turnOrder[gameState.currentTurnIdx] : null;
+                        if (activePlayerId === myPlayerId && gameState.absoluteTurnIdx !== currentProcessedTurnIdx) {
+                            currentProcessedTurnIdx = gameState.absoluteTurnIdx; 
+                            
+                            if (gameState.absoluteTurnIdx === 0) {
+                                runTransaction(roomRef, (currentData) => {
+                                    if (!currentData) return currentData;
+                                    currentData.log = (currentData.log || "") + `🏁 ゲームスタート！先攻の1ターン目はドローなし＆全員1周目は攻撃禁止です。\n`;
+                                    return currentData;
+                                });
+                            } else {
+                                triggerStartTurnDraw();
+                            }
+                        }
                     }
                 }
                 
@@ -161,9 +161,8 @@
             setDebugStatus('error', `通信拒否: ${error.message}`);
         });
 
-        // ⏱️ ホスト用カウントダウンの開始関数
         function startHostTimer() {
-            if (timerInterval) return; // すでに動いていれば多重起動防止
+            if (timerInterval) return; 
             timerInterval = setInterval(() => {
                 runTransaction(roomRef, (currentData) => {
                     if (!currentData || currentData.status !== 'playing') return currentData;
@@ -173,14 +172,12 @@
                     }
 
                     if (currentData.remainingTime > 0) {
-                        currentData.remainingTime -= 1; // 1秒減らす
+                        currentData.remainingTime -= 1; 
                     } else {
-                        // 🛑 0秒になったら強制交代処理を発動
                         let activePlayerId = currentData.turnOrder[currentData.currentTurnIdx];
                         let pName = currentData.players[activePlayerId]?.name || activePlayerId;
                         currentData.log = (currentData.log || "") + `⏰ タイムアップ！ ${pName} の制限時間が切れました。\n`;
                         
-                        // 次のターンへ進め、タイマーをリセット
                         advanceTurn(currentData);
                         currentData.remainingTime = currentData.config?.turnLimitTime || 30;
                     }
@@ -205,7 +202,7 @@
                 handLimitNum: parseInt(document.getElementById('cfg-hand-limit-num').value) || 150,
                 winScore: parseInt(document.getElementById('cfg-win-score').value) || 100,
                 maxTurns: parseInt(document.getElementById('cfg-max-turns').value) || 10,
-                turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30 // 制限時間（秒）
+                turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30 
             };
 
             const initialData = {
@@ -215,7 +212,7 @@
                 absoluteTurnIdx: 0, 
                 turnOrder: [],
                 currentTurnIdx: 0,
-                remainingTime: config.turnLimitTime, // タイマー初期化
+                remainingTime: config.turnLimitTime, 
                 log: "【システム】部屋が作成されました。カスタムルールが適用されています。\n",
                 config: config,
                 players: {}
@@ -299,13 +296,11 @@
             const activePlayerId = gameState.turnOrder ? gameState.turnOrder[gameState.currentTurnIdx] : null;
             const isMyTurn = (activePlayerId === myPlayerId && gameState.status === 'playing');
             
-            // ⏱️ タイマー表示の更新
             const timerBox = document.getElementById('timer-box');
             if (timerBox) {
                 if (gameState.status === 'playing') {
                     const time = gameState.remainingTime !== undefined ? gameState.remainingTime : '--';
                     timerBox.innerText = `⏱️ 残り時間: ${time} 秒`;
-                    // 残り5秒以下になったら文字をさらに赤く目立たせる
                     timerBox.style.color = time <= 5 ? '#ef4444' : '#b91c1c';
                 } else {
                     timerBox.innerText = `⏱️ タイマー停止中`;
@@ -466,7 +461,6 @@
                     currentData.log = (currentData.log || "") + `🏆👑【決着】${attackPlayerName} が目標の ${winTarget} 点に達したため勝者となりました！\n`;
                 }
                 
-                // ⏱️ 行動成功したらタイマーをリセット
                 currentData.remainingTime = currentData.config?.turnLimitTime || 30;
 
                 return currentData;
@@ -486,7 +480,6 @@
                 currentData.log = (currentData.log || "") + `🚪 ${pName} が行動を終了しました。\n`;
                 
                 advanceTurn(currentData);
-                // ⏱️ 次の人に回るのでタイマーを初期値にリセット
                 currentData.remainingTime = currentData.config?.turnLimitTime || 30;
 
                 return currentData;
@@ -538,7 +531,7 @@
             }, "操作A: 商×余", false, true);
         };
 
-        // 🔢 操作B: 桁和
+        // 🔢 操作B: 桁和（分裂ロジック修正完了版）
         window.opDigitSumDiv = function() {
             if (!gameState || !gameState.status || gameState.status !== 'playing') return;
             let myHand = gameState.players && gameState.players[myPlayerId] ? targetHandArray(gameState.players[myPlayerId].hand) : [];
@@ -560,12 +553,14 @@
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 
+                // 元の1枚を消費
                 hand.splice(targetIdx, 1);
+                // 商を確実に手札に追加
                 hand.push(quotient);
                 
                 let logMsg = "";
                 if (remainder > 0) {
-                    hand.push(remainder);
+                    hand.push(remainder); // 余りがあればそれも追加（2枚に分裂）
                     logMsg = `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] ➡ [${quotient}] と [${remainder}] の2枚に分裂！\n`;
                 } else {
                     logMsg = `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] ➡ 余りなしのため [${quotient}] に変換。\n`;
@@ -574,7 +569,6 @@
                 currentData.players[myPlayerId].hand = hand;
                 currentData.log = (currentData.log || "") + logMsg;
                 
-                // ⏱️ 行動成功したらタイマーをリセット
                 currentData.remainingTime = currentData.config?.turnLimitTime || 30;
 
                 return currentData;
@@ -619,7 +613,6 @@
                 currentData.players[myPlayerId].hand = hand;
                 currentData.log = (currentData.log || "") + `🔮 ${currentData.players[myPlayerId].name} が操作C(GCD): [${X}] と [${Y}] ➡ [${res}]\n`;
                 
-                // ⏱️ 行動成功したらタイマーをリセット
                 currentData.remainingTime = currentData.config?.turnLimitTime || 30;
 
                 return currentData;
@@ -657,7 +650,6 @@
                 currentData.players[myPlayerId].hand = hand;
                 currentData.log = (currentData.log || "") + `🔮 ${currentData.players[myPlayerId].name} が合成(${label}): ${n1} と ${n2} ➡ [${res}]\n`;
                 
-                // ⏱️ 行動成功したらタイマーをリセット
                 currentData.remainingTime = currentData.config?.turnLimitTime || 30;
 
                 return currentData;
