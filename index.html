@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>数理変換タクティクス</title>
+    <title>数理変換タクティクス (AI対戦版)</title>
     <style>
         :root { --primary: #2563eb; --success: #10b981; --danger: #ef4444; --bg: #f8fafc; --card-bg: #ffffff; --text: #1e293b; --border: #e2e8f0; }
         body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 10px; display: flex; justify-content: center; }
@@ -16,7 +16,6 @@
         .status-success { background: #10b981; }
         .status-error { background: #ef4444; }
 
-        /* ⏱️ タイマー表示パネルのスタイル */
         .timer-panel { background: #fff1f2; border: 2px solid #fecdd3; padding: 12px; border-radius: 12px; text-align: center; margin-bottom: 15px; }
         .timer-title { font-size: 12px; color: #991b1b; font-weight: bold; margin-bottom: 4px; }
         .timer-count { font-size: 32px; font-weight: bold; color: var(--danger); font-family: monospace; }
@@ -136,8 +135,15 @@
                         startHostTimer();
                     }
 
+                    const activePlayerId = gameState.turnOrder ? gameState.turnOrder[gameState.currentTurnIdx] : null;
+                    
+                    // 🤖 AIのターンの自動実行検知
+                    if (activePlayerId === 'P2' && gameState.players['P2']?.isAI && myPlayerId === 'P1') {
+                        // P1（あなた）のブラウザがホストとしてAIの思考肩代わり処理を行います
+                        setTimeout(() => { runSimpleAI(); }, 1000); // 1秒だけ間をあけて人間らしく見せる
+                    }
+
                     if (myPlayerId) {
-                        const activePlayerId = gameState.turnOrder ? gameState.turnOrder[gameState.currentTurnIdx] : null;
                         if (activePlayerId === myPlayerId && gameState.absoluteTurnIdx !== currentProcessedTurnIdx) {
                             currentProcessedTurnIdx = gameState.absoluteTurnIdx; 
                             
@@ -148,7 +154,7 @@
                                     return currentData;
                                 });
                             } else {
-                                triggerStartTurnDraw();
+                                triggerStartTurnDraw(myPlayerId);
                             }
                         }
                     }
@@ -163,7 +169,7 @@
             setDebugStatus('error', `通信拒否: ${error.message}`);
         });
 
-        // ⏱️ 将棋式カウントダウン（ホストP1監視処理）
+        // ⏱️ 将棋式カウントダウン
         function startHostTimer() {
             if (timerInterval) return; 
             timerInterval = setInterval(() => {
@@ -175,28 +181,24 @@
                     
                     let p = currentData.players[activePlayerId];
                     if (p.timeStock === undefined) {
-                        p.timeStock = (currentData.config?.totalTimeStock || 5) * 60; // 秒に変換
+                        p.timeStock = (currentData.config?.totalTimeStock || 5) * 60;
                     }
                     if (currentData.remainingTime === undefined) {
                         currentData.remainingTime = currentData.config?.turnLimitTime || 30;
                     }
 
-                    // 1. まずは「総持ち時間」を消費する
                     if (p.timeStock > 0) {
                         p.timeStock -= 1;
-                        currentData.timerMode = "stock"; // 状態：総持ち時間消費中
+                        currentData.timerMode = "stock";
                     } else {
-                        // 2. 総持ち時間が切れたら「毎ターンの秒読み」を減らす
-                        currentData.timerMode = "byoyomi"; // 状態：秒読み中
+                        currentData.timerMode = "byoyomi";
                         if (currentData.remainingTime > 0) {
                             currentData.remainingTime -= 1;
                         } else {
-                            // 🛑 秒読みも0秒になったらタイムアップ強制交代
                             let pName = p.name || activePlayerId;
                             currentData.log = (currentData.log || "") + `⏰ タイムアップ！ ${pName} の制限時間が切れました。\n`;
                             
                             advanceTurn(currentData);
-                            // 次の人のために秒読みタイマーを初期値に戻す
                             currentData.remainingTime = currentData.config?.turnLimitTime || 30;
                             currentData.timerMode = "stock"; 
                         }
@@ -213,7 +215,7 @@
             }
         }
 
-        window.createRoom = function(maxPlayers) {
+        window.createRoom = function(maxPlayers, launchWithAI = false) {
             const config = {
                 initHandCount: parseInt(document.getElementById('cfg-init-hand-count').value) || 5,
                 initMaxNum: parseInt(document.getElementById('cfg-init-max-num').value) || 10,
@@ -222,8 +224,8 @@
                 handLimitNum: parseInt(document.getElementById('cfg-hand-limit-num').value) || 150,
                 winScore: parseInt(document.getElementById('cfg-win-score').value) || 100,
                 maxTurns: parseInt(document.getElementById('cfg-max-turns').value) || 10,
-                totalTimeStock: parseInt(document.getElementById('cfg-total-time-stock').value) || 5, // 総持ち時間（分）
-                turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30    // 秒読み（秒）
+                totalTimeStock: parseInt(document.getElementById('cfg-total-time-stock').value) || 5,
+                turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30
             };
 
             const initialData = {
@@ -234,13 +236,53 @@
                 turnOrder: [],
                 currentTurnIdx: 0,
                 remainingTime: config.turnLimitTime, 
-                timerMode: "stock", // 初期状態は持ち時間消費
+                timerMode: "stock",
                 log: "【システム】部屋が作成されました。将棋式タイマールールが適用されています。\n",
                 config: config,
                 players: {}
             };
+            
             set(roomRef, initialData).then(() => {
-                window.joinRoom();
+                if (launchWithAI) {
+                    // AIモードの場合はP1が入室したあと、即座にP2にAIをセットしてゲーム開始状態にする
+                    runTransaction(roomRef, (currentData) => {
+                        if (!currentData) return currentData;
+                        myPlayerId = "P1";
+                        
+                        // P1 (人間) の手札生成
+                        let p1Hand = [];
+                        for(let i = 0; i < config.initHandCount; i++) {
+                            p1Hand.push(Math.floor(Math.random() * config.initMaxNum) + 1);
+                        }
+                        currentData.players["P1"] = {
+                            name: `プレイヤー 1 (あなた)`,
+                            score: 0,
+                            hand: p1Hand,
+                            timeStock: config.totalTimeStock * 60
+                        };
+                        currentData.turnOrder.push("P1");
+
+                        // P2 (🤖 AI) の手札生成
+                        let p2Hand = [];
+                        for(let i = 0; i < config.initHandCount; i++) {
+                            p2Hand.push(Math.floor(Math.random() * config.initMaxNum) + 1);
+                        }
+                        currentData.players["P2"] = {
+                            name: `🤖 CPU (AI)`,
+                            score: 0,
+                            hand: p2Hand,
+                            timeStock: config.totalTimeStock * 60,
+                            isAI: true
+                        };
+                        currentData.turnOrder.push("P2");
+
+                        currentData.status = 'playing';
+                        currentData.log = (currentData.log || "") + "【システム】AI対戦モードが起動しました！ゲームを開始します。\n";
+                        return currentData;
+                    });
+                } else {
+                    window.joinRoom();
+                }
             }).catch(err => {
                 alert(`部屋作成失敗: ${err.message}`);
             });
@@ -270,7 +312,7 @@
                     name: `プレイヤー ${currentCount + 1}`,
                     score: 0,
                     hand: randomHand,
-                    timeStock: (rule.totalTimeStock || 5) * 60 // 各プレイヤー個別の持ち時間ストック
+                    timeStock: (rule.totalTimeStock || 5) * 60
                 };
                 currentData.turnOrder.push(newId);
                 
@@ -287,14 +329,14 @@
             });
         };
 
-        function triggerStartTurnDraw() {
+        function triggerStartTurnDraw(targetPlayerId) {
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
                 const activePlayerId = currentData.turnOrder[currentData.currentTurnIdx];
-                if (activePlayerId !== myPlayerId) return currentData; 
+                if (activePlayerId !== targetPlayerId) return currentData; 
                 
                 const rule = currentData.config || { drawCount: 2, drawMaxNum: 20 };
-                let hand = targetHandArray(currentData.players[myPlayerId].hand);
+                let hand = targetHandArray(currentData.players[targetPlayerId].hand);
                 
                 let drawnNums = [];
                 for(let i = 0; i < rule.drawCount; i++) {
@@ -303,13 +345,12 @@
                     drawnNums.push(`[${drawn}]`);
                 }
                 
-                currentData.players[myPlayerId].hand = hand;
-                currentData.log = (currentData.log || "") + `📥 ターン開始ドロー: ${currentData.players[myPlayerId].name} は ${drawnNums.join(', ')} を引きました。\n`;
+                currentData.players[targetPlayerId].hand = hand;
+                currentData.log = (currentData.log || "") + `📥 ターン開始ドロー: ${currentData.players[targetPlayerId].name} は ${drawnNums.join(', ')} を引きました。\n`;
                 return currentData;
             });
         }
 
-        // 秒を「分:秒」に変換する補助関数
         function formatMinutesSeconds(totalSeconds) {
             if (totalSeconds === undefined || isNaN(totalSeconds)) return "--:--";
             const mins = Math.floor(totalSeconds / 60);
@@ -327,7 +368,6 @@
             const activePlayerId = gameState.turnOrder ? gameState.turnOrder[gameState.currentTurnIdx] : null;
             const isMyTurn = (activePlayerId === myPlayerId && gameState.status === 'playing');
             
-            // ⏱️ タイマー表示表示の更新
             const timerTitle = document.getElementById('timer-title');
             const timerBox = document.getElementById('timer-box');
             
@@ -339,12 +379,12 @@
                     if (gameState.timerMode === "stock" && stockTime > 0) {
                         timerTitle.innerText = `⏳ 現在の手番の総持ち時間`;
                         timerBox.innerText = formatMinutesSeconds(stockTime);
-                        timerBox.style.color = '#2563eb'; // 持ち時間中は青
+                        timerBox.style.color = '#2563eb';
                     } else {
                         timerTitle.innerText = `🚨 持ち時間終了！秒読みモード`;
                         const time = gameState.remainingTime !== undefined ? gameState.remainingTime : '--';
                         timerBox.innerText = `${time} 秒`;
-                        timerBox.style.color = time <= 5 ? '#ef4444' : '#b91c1c'; // 残り5秒以下で赤
+                        timerBox.style.color = time <= 5 ? '#ef4444' : '#b91c1c';
                     }
                 } else {
                     timerTitle.innerText = `⏱️ タイマー状態`;
@@ -405,7 +445,7 @@
                     }
                 } else if (activePlayerId && gameState.players) {
                     const activeName = gameState.players[activePlayerId]?.name || activePlayerId;
-                    turnInfo.innerText = `${activeName} の番です (周回数: ${gameState.turnCount} / ${(gameState.config ? gameState.config.maxTurns : '--')})。待機中...`;
+                    turnInfo.innerText = `${activeName} の番です (周回数: ${gameState.turnCount} / ${(gameState.config ? gameState.config.maxTurns : '--')})。思考・待機中...`;
                     turnInfo.style.color = "#64748b";
                 }
             }
@@ -449,7 +489,6 @@
         }
 
         function resetTurnTimerStock(currentData) {
-            // 手番が完了したら、次の人のために秒読みタイマーを既定値にリセット
             currentData.remainingTime = currentData.config?.turnLimitTime || 30;
             currentData.timerMode = "stock"; 
         }
@@ -636,11 +675,7 @@
             let Y = myHand[selectedIndices[1]];
             if (X === undefined || Y === undefined) return;
             
-            let a = X, b = Y;
-            while (b !== 0) {
-                let t = b; b = a % b; a = t;
-            }
-            let gcd = a;
+            let gcd = calculateGcd(X, Y);
             if (gcd === 1) return alert('2枚の最大公約数が 1 のため操作Cは使えません');
             
             let res = X * gcd;
@@ -670,6 +705,14 @@
             });
         };
         
+        function calculateGcd(x, y) {
+            let a = x, b = y;
+            while (b !== 0) {
+                let t = b; b = a % b; a = t;
+            }
+            return a;
+        }
+
         function executeOp(formula, label, checkSub = false, isDivProd = false) {
             if (!gameState || !gameState.status || gameState.status !== 'playing') return;
             let myHand = gameState.players && gameState.players[myPlayerId] ? targetHandArray(gameState.players[myPlayerId].hand) : [];
@@ -707,6 +750,214 @@
         }
 
         window.resetRoom = function() { if(confirm("部屋をリセットしますか？")) { set(roomRef, null); location.reload(); } };
+
+        // ==========================================
+        // 🤖 JavaScript製 簡易AI (CPU) 思考エンジン
+        // ==========================================
+        let isAIShinking = false; // 二重実行防止
+        function runSimpleAI() {
+            if (isAIShinking || !gameState || gameState.status !== 'playing') return;
+            isAIShinking = true;
+
+            runTransaction(roomRef, (currentData) => {
+                if (!currentData || currentData.status !== 'playing') return currentData;
+                
+                // 現在の手番が本当にP2(AI)か最終確認
+                const activePlayerId = currentData.turnOrder[currentData.currentTurnIdx];
+                if (activePlayerId !== 'P2') return currentData;
+
+                let aiHand = targetHandArray(currentData.players['P2'].hand);
+                let p1Hand = targetHandArray(currentData.players['P1'].hand);
+                const limitNum = currentData.config?.handLimitNum || 150;
+                const isFirstRound = currentData.turnCount === 1; // 1周目は攻撃禁止
+
+                // 1ターン前のドロー処理をAIにも適用
+                if (currentData.absoluteTurnIdx !== currentProcessedTurnIdx) {
+                    currentProcessedTurnIdx = currentData.absoluteTurnIdx;
+                    const rule = currentData.config || { drawCount: 2, drawMaxNum: 20 };
+                    let drawnNums = [];
+                    for(let i = 0; i < rule.drawCount; i++) {
+                        let drawn = Math.floor(Math.random() * rule.drawMaxNum) + 1;
+                        aiHand.push(drawn);
+                        drawnNums.push(`[${drawn}]`);
+                    }
+                    currentData.players['P2'].hand = aiHand;
+                    currentData.log = (currentData.log || "") + `📥 ターン開始ドロー: 🤖 CPU (AI) は ${drawnNums.join(', ')} を引きました。\n`;
+                }
+
+                if (aiHand.length === 0) {
+                    // 手札がないなら行動終了
+                    currentData.log = (currentData.log || "") + `🚪 🤖 CPU (AI) は手札がないため行動を終了しました。\n`;
+                    advanceTurn(currentData);
+                    resetTurnTimerStock(currentData);
+                    return currentData;
+                }
+
+                let bestAction = null;
+                let maxGainedScore = 0;
+
+                // 🧠 ループ①：手札を1枚だけ使う演算「操作B（桁和分裂）」をシミュレーション
+                for (let i = 0; i < aiHand.length; i++) {
+                    let num = aiHand[i];
+                    let sum = String(num).split('').reduce((s, d) => s + parseInt(d), 0);
+                    if (sum === 0) continue;
+                    let quot = Math.floor(num / sum);
+                    let rem = num % sum;
+
+                    if (quot > limitNum || rem > limitNum) continue;
+
+                    // 分裂して生まれた数それぞれで攻撃を試算
+                    let testNums = [quot];
+                    if (rem > 0) testNums.push(rem);
+
+                    if (!isFirstRound) {
+                        testNums.forEach(atk => {
+                            if (atk === 1) return;
+                            let score = 0;
+                            p1Hand.forEach(p1Card => { if (p1Card % atk === 0) score += p1Card; });
+                            if (score > maxGainedScore) {
+                                maxGainedScore = score;
+                                bestAction = { type: 'OP_B', idx1: i, targetAtk: atk };
+                            }
+                        });
+                    }
+                }
+
+                // 🧠 ループ②：手札を2枚使う演算（足し算・引き算・操作A・操作C）を総当たりシミュレーション
+                for (let i = 0; i < aiHand.length; i++) {
+                    for (let j = 0; j < aiHand.length; j++) {
+                        if (i === j) continue;
+                        let n1 = aiHand[i];
+                        let n2 = aiHand[j];
+
+                        let candidates = [
+                            { type: 'ADD', val: n1 + n2 },
+                            { type: 'SUB', val: Math.abs(n1 - n2) }
+                        ];
+                        if (n2 !== 0) candidates.push({ type: 'OP_A', val: Math.floor(n1 / n2) * (n1 % n2) });
+                        
+                        let gcd = calculateGcd(n1, n2);
+                        if (gcd > 1) candidates.push({ type: 'OP_C', val: n1 * gcd });
+
+                        candidates.forEach(c => {
+                            if (c.val <= 0 || c.val > limitNum) return;
+                            
+                            // 1周目でなければ、作った数で即座に攻撃して得られるスコアを計算
+                            if (!isFirstRound && c.val > 1) {
+                                let score = 0;
+                                p1Hand.forEach(p1Card => { if (p1Card % c.val === 0) score += p1Card; });
+                                if (score > maxGainedScore) {
+                                    maxGainedScore = score;
+                                    bestAction = { type: 'COMBO_ATTACK', idx1: i, idx2: j, opType: c.type, targetAtk: c.val };
+                                }
+                            }
+                        });
+                    }
+                }
+
+                // 🧠 ループ③：手元にある既存の手札でそのまま攻撃して一番高い点数を狙えるか（合成なし攻撃）
+                if (!isFirstRound) {
+                    for (let i = 0; i < aiHand.length; i++) {
+                        let atk = aiHand[i];
+                        if (atk === 1) continue;
+                        let score = 0;
+                        p1Hand.forEach(p1Card => { if (p1Card % atk === 0) score += p1Card; });
+                        if (score > maxGainedScore) {
+                            maxGainedScore = score;
+                            bestAction = { type: 'DIRECT_ATTACK', idx1: i, targetAtk: atk };
+                        }
+                    }
+                }
+
+                // ⚡ 決定した「最善手」を実行に移す
+                if (bestAction && maxGainedScore > 0) {
+                    // 【攻撃手が存在する場合】
+                    if (bestAction.type === 'DIRECT_ATTACK') {
+                        let atkNum = aiHand[bestAction.idx1];
+                        aiHand.splice(bestAction.idx1, 1);
+                        
+                        let keptP1 = [];
+                        p1Hand.forEach(c => { if (c % atkNum !== 0) keptP1.push(c); });
+                        
+                        currentData.players['P1'].hand = keptP1;
+                        currentData.players['P2'].hand = aiHand;
+                        currentData.players['P2'].score += maxGainedScore;
+                        currentData.log = (currentData.log || "") + `⚔️ 🤖 CPU (AI) が手札の [${atkNum}] でダイレクト攻撃！ あなたのカードを強奪し、${maxGainedScore} 点獲得！\n`;
+                    } 
+                    else if (bestAction.type === 'OP_B') {
+                        let num = aiHand[bestAction.idx1];
+                        let sum = String(num).split('').reduce((s, d) => s + parseInt(d), 0);
+                        let quot = Math.floor(num / sum);
+                        let rem = num % sum;
+
+                        aiHand.splice(bestAction.idx1, 1);
+                        // 攻撃に使った方のカードは消滅、もう片方は手札に残る
+                        if (bestAction.targetAtk === quot && rem > 0) aiHand.push(rem);
+                        if (bestAction.targetAtk === rem) aiHand.push(quot);
+
+                        let keptP1 = [];
+                        p1Hand.forEach(c => { if (c % bestAction.targetAtk !== 0) keptP1.push(c); });
+                        
+                        currentData.players['P1'].hand = keptP1;
+                        currentData.players['P2'].hand = aiHand;
+                        currentData.players['P2'].score += maxGainedScore;
+                        currentData.log = (currentData.log || "") + `🔮⚔️ 🤖 CPU (AI) は [${num}] を操作B(桁和)で分解！ 生まれた [${bestAction.targetAtk}] で攻撃し、${maxGainedScore} 点獲得！\n`;
+                    } 
+                    else if (bestAction.type === 'COMBO_ATTACK') {
+                        let val1 = aiHand[bestAction.idx1];
+                        let val2 = aiHand[bestAction.idx2];
+
+                        // 手札から2枚除去して攻撃（合成してすぐ投下した扱い）
+                        aiHand = aiHand.filter((_, idx) => idx !== bestAction.idx1 && idx !== bestAction.idx2);
+
+                        let keptP1 = [];
+                        p1Hand.forEach(c => { if (c % bestAction.targetAtk !== 0) keptP1.push(c); });
+                        
+                        currentData.players['P1'].hand = keptP1;
+                        currentData.players['P2'].hand = aiHand;
+                        currentData.players['P2'].score += maxGainedScore;
+                        currentData.log = (currentData.log || "") + `🔮⚔️ 🤖 CPU (AI) が [${val1}] と [${val2}] を(${bestAction.opType})合成！ 錬成した [${bestAction.targetAtk}] で攻撃し、${maxGainedScore} 点獲得！\n`;
+                    }
+                } 
+                else {
+                    // 【攻撃手が無い場合】：防御/育成として、手札の「最も大きな数2つ」を足し算してデカい盾を作る
+                    if (aiHand.length >= 2) {
+                        aiHand.sort((a, b) => b - a); // 降順ソート
+                        let n1 = aiHand[0];
+                        let n2 = aiHand[1];
+                        if (n1 + n2 <= limitNum) {
+                            aiHand.splice(0, 2);
+                            aiHand.push(n1 + n2);
+                            currentData.players['P2'].hand = aiHand;
+                            currentData.log = (currentData.log || "") + `🔮 🤖 CPU (AI) は攻め手がないため、[${n1}] と [${n2}] を足し算して [${n1+n2}] を合成しました。(防御)\n`;
+                        } else {
+                            currentData.log = (currentData.log || "") + `🔮 🤖 CPU (AI) は現状維持を選択しました。\n`;
+                        }
+                    } else {
+                        currentData.log = (currentData.log || "") + `🔮 🤖 CPU (AI) は手札が少ないため、そのまま待機しました。\n`;
+                    }
+                }
+
+                // 勝利判定
+                const winTarget = currentData.config?.winScore || 100;
+                if (currentData.players['P2'].score >= winTarget) {
+                    currentData.status = 'finished';
+                    currentData.log = (currentData.log || "") + `🏆👑【決着】🤖 CPU (AI) が目標の ${winTarget} 点に達したため、AIの勝利となりました！\n`;
+                }
+
+                // 行動終了・手番交代
+                currentData.log = (currentData.log || "") + `🚪 🤖 CPU (AI) が行動を終了しました。\n`;
+                advanceTurn(currentData);
+                resetTurnTimerStock(currentData);
+                return currentData;
+            }).then(() => {
+                isAIShinking = false;
+                updateDOM();
+            }).catch(err => {
+                isAIShinking = false;
+                console.error("AI思考エラー: ", err);
+            });
+        }
     </script>
 </head>
 <body>
@@ -759,10 +1010,13 @@
             </div>
         </div>
 
-        <p style="font-size:13px; font-weight:bold; color:#475569; margin-bottom:5px;">部屋の人数を選択して開始：</p>
-        <button style="background:#2563eb; color:white; padding:10px 20px; margin:5px;" onclick="createRoom(2)">2人部屋を作る</button>
-        <button style="background:#7c3aed; color:white; padding:10px 20px; margin:5px;" onclick="createRoom(3)">3人部屋を作る</button>
-        <button style="background:#10b981; color:white; padding:10px 20px; margin:5px;" onclick="createRoom(4)">4人部屋を作る</button>
+        <p style="font-size:13px; font-weight:bold; color:#475569; margin-bottom:5px;">対戦モードを選択して開始：</p>
+        <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+            <button style="background:#1e293b; color:white; padding:12px 20px; flex: 1; min-width: 140px;" onclick="createRoom(2, true)">🤖 CPUとタイマンで戦う</button>
+            <button style="background:#2563eb; color:white; padding:12px 20px;" onclick="createRoom(2, false)">2人部屋</button>
+            <button style="background:#7c3aed; color:white; padding:12px 20px;" onclick="createRoom(3, false)">3人部屋</button>
+            <button style="background:#10b981; color:white; padding:12px 20px;" onclick="createRoom(4, false)">4人部屋</button>
+        </div>
     </div>
 
     <div id="waiting-screen" class="waiting-screen" style="display:none;">
