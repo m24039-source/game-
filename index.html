@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>数理変換タクティクス (PvP・マッチング完全修正版)</title>
+    <title>数理変換タクティクス - マルチ得点奪取版</title>
     <style>
         :root { --primary: #2563eb; --success: #10b981; --danger: #ef4444; --bg: #f8fafc; --card-bg: #ffffff; --text: #1e293b; --border: #e2e8f0; }
         body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 10px; display: flex; justify-content: center; }
@@ -12,13 +12,13 @@
         .setup-panel { background: #f1f5f9; padding: 15px; border-radius: 12px; text-align: center; margin-bottom: 15px; }
         .btn-role { padding: 12px 20px; margin: 8px; font-size: 14px; color: white; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; width: 80%; max-width: 300px; transition: opacity 0.2s; }
         .btn-role:disabled { background: #cbd5e1 !important; color: #94a3b8 !important; cursor: not-allowed; }
+        .room-select { margin-bottom: 15px; padding: 10px; background: #e0f2fe; border-radius: 8px; font-weight: bold; }
         .pvp-board { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 15px; }
-        .player-status { padding: 12px; border-radius: 8px; border: 2px solid transparent; transition: all 0.3s; }
-        .status-host { background: #fee2e2; border-color: #fca5a5; }
-        .status-guest { background: #fef3c7; border-color: #fcd34d; }
-        .active-turn { box-shadow: 0 0 12px rgba(37,99,235,0.6); border-color: var(--primary) !important; }
+        .player-status { padding: 12px; border-radius: 8px; border: 2px solid transparent; background: #f8fafc; border-color: var(--border); transition: all 0.3s; }
+        .active-turn { box-shadow: 0 0 12px rgba(37,99,235,0.6); border-color: var(--primary) !important; background: #eff6ff; }
+        .my-status { border-color: #cbd5e1; background: #f1f5f9; }
         .player-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; margin-bottom: 8px; }
-        .hp-display { font-size: 18px; color: var(--danger); }
+        .score-display { font-size: 18px; color: var(--success); font-weight: bold; }
         .mini-card-container { display: flex; flex-wrap: wrap; gap: 6px; }
         .mini-card { background: white; border: 1px solid #cbd5e1; padding: 4px 10px; border-radius: 4px; font-size: 14px; font-weight: bold; }
         .section-title { font-size: 13px; font-weight: bold; color: #64748b; margin-bottom: 8px; border-left: 4px solid var(--primary); padding-left: 8px; }
@@ -29,162 +29,352 @@
         button { padding: 10px; border: none; border-radius: 8px; font-size: 13px; font-weight: bold; cursor: pointer; background: #e2e8f0; color: #334155; }
         button:disabled { background: #cbd5e1 !important; color: #94a3b8 !important; cursor: not-allowed; }
         .btn-main { grid-column: span 2; background: #7c3aed; color: white; font-size: 14px; }
-        .btn-attack { grid-column: span 2; background: linear-gradient(135deg, #ef4444, #b91c1c); color: white; font-size: 15px; }
+        .btn-attack { grid-column: span 2; background: linear-gradient(135deg, #10b981, #059669); color: white; font-size: 15px; }
         .btn-op { background: #f1f5f9; border: 1px solid var(--border); }
         .log-container { background: #1e293b; color: #f8fafc; padding: 10px; border-radius: 8px; height: 120px; overflow-y: auto; font-family: monospace; font-size: 12px; line-height: 1.5; }
         .url-box { background: #e0f2fe; border: 1px solid #bae6fd; padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 15px; word-break: break-all; }
-        .error-overlay { background: #fee2e2; color: #991b1b; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-size: 12px; display: none; border: 1px solid #fca5a5; }
+        .waiting-screen { text-align: center; padding: 30px; background: #f1f5f9; border-radius: 12px; margin-bottom: 15px; }
     </style>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getDatabase, ref, set, onValue, update, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+        import { getDatabase, ref, set, onValue, update, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
         
-        // 【重要】ここにあなた専用のRealtime DatabaseのURLを入れます
-        // もしエラーになる場合は、自動的に「ローカル対戦検証モード」に切り替わります
-        const firebaseConfig = { databaseURL: "https://math-tactics-default-rtdb.firebaseio.com/" };
+        // ==========================================
+        // 👇【重要】あなたのFirebase URLに書き換えてください！
+        // ==========================================
+        const firebaseConfig = { 
+            databaseURL: "https://math-tactics-default-rtdb.firebaseio.com/" 
+        };
+        // ==========================================
         
         let db, roomRef, roomId = window.location.hash.substring(1);
         if (!roomId) { roomId = "room_" + Math.random().toString(36).substring(2, 11); window.location.hash = roomId; }
-        function showError(message) { const errDiv = document.getElementById('error-box'); if (errDiv) { errDiv.innerText = message; errDiv.style.display = 'block'; } }
-        try {
-            const app = initializeApp(firebaseConfig); db = getDatabase(app); roomRef = ref(db, 'rooms/' + roomId);
-            onValue(roomRef, (snapshot) => {
-                const data = snapshot.val();
-                if (data) {
-                    gameState = data; gameState.hostHand = safeArray(data.hostHand); gameState.guestHand = safeArray(data.guestHand);
-                    document.getElementById('btn-join-host').disabled = !!data.hostOnline;
-                    document.getElementById('btn-join-guest').disabled = !!data.guestOnline;
-                    if (myRole) updateDOM();
+        
+        const app = initializeApp(firebaseConfig);
+        db = getDatabase(app);
+        roomRef = ref(db, 'rooms/' + roomId);
+        
+        let gameState = {};
+        let myPlayerId = null; 
+        let selectedIndices = [];
+        
+        window.addEventListener('DOMContentLoaded', () => { 
+            document.getElementById('invite-url').innerText = window.location.href; 
+        });
+
+        // データベース監視
+        onValue(roomRef, (snapshot) => {
+            const data = snapshot.val();
+            if (!data) {
+                // 部屋がまだない場合、初期設定パネルを表示
+                document.getElementById('room-setup').style.display = 'block';
+                document.getElementById('waiting-screen').style.display = 'none';
+                document.getElementById('game-screen').style.display = 'none';
+                return;
+            }
+            
+            gameState = data;
+            document.getElementById('room-setup').style.display = 'none';
+            
+            // 全員揃っているかチェック
+            const currentPlayersCount = gameState.players ? Object.keys(gameState.players).length : 0;
+            
+            if (gameState.status === 'waiting') {
+                document.getElementById('waiting-screen').style.display = 'block';
+                document.getElementById('game-screen').style.display = 'none';
+                document.getElementById('current-count').innerText = currentPlayersCount;
+                document.getElementById('target-count').innerText = gameState.maxPlayers;
+                
+                // 自分がまだ入室してなくて、空きがあれば自動入室ボタンなどの制御
+                if (!myPlayerId) {
+                    document.getElementById('btn-auto-join').style.display = 'block';
                 } else {
-                    document.getElementById('btn-join-host').disabled = false; document.getElementById('btn-join-guest').disabled = false;
+                    document.getElementById('btn-auto-join').style.display = 'none';
                 }
-            }, (error) => { showError("【接続調整】ソロプレイ/ローカル対戦モードに自動で切り替えました。"); enableLocalFallback(); });
-        } catch (e) { showError("【初期化完了】ローカル検証モードを開始します。"); enableLocalFallback(); }
-        const initialGameState = { hostHP: 100, guestHP: 100, hostHand: [5, 6, 8], guestHand: [5, 6, 8], turn: 1, currentTurnRole: "host", hostOnline: false, guestOnline: false, log: "【システム】ゲームが開始されました。\n" };
-        let gameState = { ...initialGameState }, myRole = null, selectedIndices = [], isLocalMode = false;
-        function safeArray(data) { if (!data) return []; if (Array.isArray(data)) return data; return Object.values(data); }
-        function enableLocalFallback() { isLocalMode = true; document.getElementById('btn-join-host').disabled = false; document.getElementById('btn-join-guest').disabled = false; }
-        window.addEventListener('DOMContentLoaded', () => { document.getElementById('invite-url').innerText = window.location.href; });
-        window.selectRole = async function(role) {
-            const btnHost = document.getElementById('btn-join-host'), btnGuest = document.getElementById('btn-join-guest');
-            btnHost.innerText = "入室処理中..."; btnGuest.innerText = "入室処理中..."; btnHost.disabled = true; btnGuest.disabled = true;
-            if (isLocalMode || !roomRef) {
-                myRole = role; if (role === 'host') gameState.hostOnline = true; else gameState.guestOnline = true;
-                document.getElementById('setup-screen').style.display = 'none'; document.getElementById('game-screen').style.display = 'block'; updateDOM(); return;
+            } else if (gameState.status === 'playing') {
+                document.getElementById('waiting-screen').style.display = 'none';
+                document.getElementById('game-screen').style.display = 'block';
+                if (myPlayerId) updateDOM();
             }
-            try {
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 2000));
-                const snapshot = await Promise.race([get(roomRef), timeoutPromise]).catch(() => { throw new Error("Timeout"); });
-                const currentData = snapshot.val() || {};
-                if (role === 'host' && currentData.hostOnline) { alert("プレイヤー1は満員です"); resetSetupButtons(currentData); return; }
-                if (role === 'guest' && currentData.guestOnline) { alert("プレイヤー2は満員です"); resetSetupButtons(currentData); return; }
-                myRole = role; document.getElementById('setup-screen').style.display = 'none'; document.getElementById('game-screen').style.display = 'block';
-                if (role === 'host') { await set(roomRef, { ...initialGameState, hostOnline: true, guestOnline: currentData.guestOnline || false }); }
-                else { await update(roomRef, { '/guestOnline': true }); }
-            } catch (error) {
-                myRole = role; isLocalMode = true; document.getElementById('setup-screen').style.display = 'none'; document.getElementById('game-screen').style.display = 'block'; updateDOM();
-            }
+        });
+
+        // 部屋を新規作成する（ホスト）
+        window.createRoom = function(maxPlayers) {
+            const initialData = {
+                status: 'waiting',
+                maxPlayers: maxPlayers,
+                turnCount: 1,
+                turnOrder: [],
+                currentTurnIdx: 0,
+                log: "【システム】部屋が作成されました。参加を待っています。\n",
+                players: {}
+            };
+            set(roomRef, initialData).then(() => {
+                joinRoom(); // 作成したら自動で入室
+            });
         };
-        function resetSetupButtons(currentData) {
-            const bh = document.getElementById('btn-join-host'), bg = document.getElementById('btn-join-guest');
-            bh.innerText = "プレイヤー1 (先攻)"; bg.innerText = "プレイヤー2 (後攻)"; bh.disabled = !!currentData.hostOnline; bg.disabled = !!currentData.guestOnline;
-        }
-        function saveState(newState) { if (isLocalMode || !roomRef) { gameState = newState; updateDOM(); } else { set(roomRef, newState).catch(() => { gameState = newState; updateDOM(); }); } }
+
+        // 部屋に参加する
+        window.joinRoom = function() {
+            runTransaction(roomRef, (currentData) => {
+                if (!currentData) return currentData;
+                if (currentData.status !== 'waiting') return; // すでに始まっていたら入れない
+                
+                if (!currentData.players) currentData.players = {};
+                const currentCount = Object.keys(currentData.players).length;
+                
+                if (currentCount >= currentData.maxPlayers) return; // 満員
+                
+                // 新しいプレイヤーのID（P1, P2, P3...）を決定
+                const newId = "P" + (currentCount + 1);
+                myPlayerId = newId;
+                
+                currentData.players[newId] = {
+                    name: `プレイヤー ${currentCount + 1}`,
+                    score: 0,
+                    hand: [5, 6, 8, 15, 30, 45] // 初期手札 (テストしやすいよう例の数字も追加)
+                };
+                currentData.turnOrder.push(newId);
+                
+                // 設定人数に達したら自動でゲーム開始状態にする
+                if (Object.keys(currentData.players).length == currentData.maxPlayers) {
+                    currentData.status = 'playing';
+                    currentData.log += "【システム】全員揃いました！ゲームを開始します。\n";
+                } else {
+                    currentData.log += `【システム】${newId} が入室しました。\n`;
+                }
+                
+                return currentData;
+            });
+        };
+
         function updateDOM() {
-            document.getElementById('host-hp').innerText = `HP: ${gameState.hostHP}`; document.getElementById('guest-hp').innerText = `HP: ${gameState.guestHP}`;
-            document.getElementById('panel-host').className = "player-status status-host" + (gameState.currentTurnRole === 'host' ? ' active-turn' : '');
-            document.getElementById('panel-guest').className = "player-status status-guest" + (gameState.currentTurnRole === 'guest' ? ' active-turn' : '');
-            renderMiniHand('host-hand-display', gameState.hostHand); renderMiniHand('guest-hand-display', gameState.guestHand);
-            const isMyTurn = (gameState.currentTurnRole === myRole) || isLocalMode;
+            const board = document.getElementById('pvp-board');
+            board.innerHTML = '';
+            
+            const activePlayerId = gameState.turnOrder[gameState.currentTurnIdx];
+            const isMyTurn = (activePlayerId === myPlayerId);
+            
+            // 全プレイヤーのステータスを表示
+            gameState.turnOrder.forEach(pid => {
+                const p = gameState.players[pid];
+                const div = document.createElement('div');
+                div.className = "player-status" + (pid === activePlayerId ? ' active-turn' : '') + (pid === myPlayerId ? ' my-status' : '');
+                
+                // 手札配列の安全な取得
+                const handArr = p.hand ? (Array.isArray(p.hand) ? p.hand : Object.values(p.hand)) : [];
+                
+                div.innerHTML = `
+                    <div class="player-header">
+                        <div>👤 ${p.name} ${pid === myPlayerId ? '(あなた)' : ''}</div>
+                        <div class="score-display">${p.score} pt</div>
+                    </div>
+                    <div class="mini-card-container">
+                        ${handArr.map(n => `<span class="mini-card">${n}</span>`).join('')}
+                    </div>
+                `;
+                board.appendChild(div);
+            });
+
+            // ターンアナウンス
             const turnInfo = document.getElementById('turn-info');
-            let roleLabel = myRole === 'host' ? '【P1: 先攻】' : '【P2: 後攻】';
-            if (isLocalMode) roleLabel += " (ローカル対戦)";
-            if (gameState.currentTurnRole === myRole) { turnInfo.innerText = `★ ${roleLabel} あなたの番です (ターン: ${gameState.turn})`; turnInfo.style.color = "var(--primary)"; }
-            else if (isLocalMode) { turnInfo.innerText = `🔄 ${roleLabel} 現在は [${gameState.currentTurnRole === 'host' ? 'P1先攻' : 'P2後攻'}] の番です`; turnInfo.style.color = "#7c3aed"; }
-            else { turnInfo.innerText = `${roleLabel} 相手の番です。待機中...`; turnInfo.style.color = "#64748b"; }
+            if (isMyTurn) {
+                turnInfo.innerText = `★ あなたの番です (ターン数: ${gameState.turnCount})`;
+                turnInfo.style.color = "var(--primary)";
+            } else {
+                const activeName = gameState.players[activePlayerId]?.name || activePlayerId;
+                turnInfo.innerText = `${activeName} の番です。待機中...`;
+                turnInfo.style.color = "#64748b";
+            }
+
+            // コマンドボタンの制御
             document.querySelectorAll('.actions-grid button').forEach(btn => { btn.disabled = !isMyTurn; });
-            const activeRole = isLocalMode ? gameState.currentTurnRole : myRole;
-            const myHand = (activeRole === 'host') ? gameState.hostHand : gameState.guestHand;
-            const handArea = document.getElementById('hand-area'); handArea.innerHTML = '';
-            document.getElementById('hand-section-title').innerText = isLocalMode ? `操作中の手札 (現在: ${gameState.currentTurnRole === 'host' ? 'P1先攻' : 'P2後攻'})` : "あなたの手札";
-            if (!myHand || myHand.length === 0) { handArea.innerHTML = '<span style="color:#2563eb; font-size:12px;">手札なし</span>'; }
-            else {
-                myHand.forEach((num, index) => {
-                    const div = document.createElement('div'); div.className = 'card' + (selectedIndices.includes(index) ? ' selected' : ''); div.innerText = num;
-                    div.onclick = () => { if (!isMyTurn) return; if (selectedIndices.includes(index)) { selectedIndices = selectedIndices.filter(i => i !== index); } else { selectedIndices.push(index); } updateDOM(); };
+
+            // 自分の手札レンダリング
+            const myHandArr = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
+            const handArea = document.getElementById('hand-area'); 
+            handArea.innerHTML = '';
+            
+            if (myHandArr.length === 0) { 
+                handArea.innerHTML = '<span style="color:#2563eb; font-size:12px;">手札なし</span>'; 
+            } else {
+                myHandArr.forEach((num, index) => {
+                    const div = document.createElement('div'); 
+                    div.className = 'card' + (selectedIndices.includes(index) ? ' selected' : ''); 
+                    div.innerText = num;
+                    div.onclick = () => { 
+                        if (!isMyTurn) return; 
+                        if (selectedIndices.includes(index)) { 
+                            selectedIndices = selectedIndices.filter(i => i !== index); 
+                        } else { 
+                            selectedIndices.push(index); 
+                        } 
+                        updateDOM(); 
+                    };
                     handArea.appendChild(div);
                 });
             }
-            if (gameState.hostHP <= 0 || gameState.guestHP <= 0) {
-                document.querySelectorAll('.actions-grid button').forEach(btn => { btn.disabled = true; });
-                turnInfo.innerText = gameState.hostHP <= 0 ? "🏆 プレイヤー2 (後攻) の勝利！" : "🏆 プレイヤー1 (先攻) の勝利！"; turnInfo.style.color = "var(--danger)";
-            }
-            const logArea = document.getElementById('log-area'); logArea.innerText = gameState.log; logArea.scrollTop = logArea.scrollHeight;
+
+            // ログ更新
+            const logArea = document.getElementById('log-area'); 
+            logArea.innerText = gameState.log; 
+            logArea.scrollTop = logArea.scrollHeight;
         }
-        function renderMiniHand(elementId, handArray) { const container = document.getElementById(elementId); container.innerHTML = ''; (handArray || []).forEach(num => { const span = document.createElement('span'); span.className = 'mini-card'; span.innerText = num; container.appendChild(span); }); }
-        function pushLog(msg) { const name = (isLocalMode ? gameState.currentTurnRole : myRole) === 'host' ? 'P1' : 'P2'; gameState.log += `[${name}] ${msg}\n`; }
-        function getMyHandArray() { return ((isLocalMode ? gameState.currentTurnRole : myRole) === 'host') ? gameState.hostHand : gameState.guestHand; }
-        function setMyHandArray(arr) { if (((isLocalMode ? gameState.currentTurnRole : myRole) === 'host')) gameState.hostHand = arr; else gameState.guestHand = arr; }
+
+        // ⚔️ 新ルール：約数奪取アタックコマンド！
         window.executeAttack = function() {
-            let hand = getMyHandArray(); if (selectedIndices.length !== 1) return alert('手札を1枚選んでください。');
-            let myIdx = selectedIndices[0], damage = hand[myIdx];
-            if ((isLocalMode ? gameState.currentTurnRole : myRole) === 'host') { gameState.guestHP = Math.max(0, gameState.guestHP - damage); gameState.hostHand.splice(myIdx, 1); }
-            else { gameState.hostHP = Math.max(0, gameState.hostHP - damage); gameState.guestHand.splice(myIdx, 1); }
-            pushLog(`⚔️ 相手に ${damage} ダメージ！`); selectedIndices = []; saveState(gameState);
+            let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
+            if (selectedIndices.length !== 1) return alert('攻撃に使う手札を1枚選んでください。');
+            
+            let myIdx = selectedIndices[0];
+            let attackNum = myHand[myIdx]; // 攻撃に使う数 (例: 15)
+            
+            runTransaction(roomRef, (currentData) => {
+                if (!currentData) return currentData;
+                
+                let totalGainedPoints = 0;
+                let attackPlayerName = currentData.players[myPlayerId].name;
+                
+                // 1. 自分以外のプレイヤーの手札を検査して約数があれば奪う
+                Object.keys(currentData.players).forEach(pid => {
+                    if (pid === myPlayerId) return; // 自分はスキップ
+                    
+                    let targetHand = currentData.players[pid].hand ? (Array.isArray(currentData.players[pid].hand) ? currentData.players[pid].hand : Object.values(currentData.players[pid].hand)) : [];
+                    
+                    // 相手の手札の数が、自分の出した数の倍数（＝相手から見て自分の数が約数）であるものを探す
+                    // 例: 相手の数(30) % 自分の数(15) === 0
+                    let keptCards = [];
+                    targetHand.forEach(cardNum => {
+                        if (cardNum % attackNum === 0) {
+                            totalGainedPoints += cardNum; // そのポイントを蓄積
+                            currentData.log += ` 🎯 ${currentData.players[pid].name} の [${cardNum}] を撃破！\n`;
+                        } else {
+                            keptCards.push(cardNum); // 残るカード
+                        }
+                    });
+                    currentData.players[pid].hand = keptCards; // 相手の手札を更新
+                });
+                
+                // 2. 自分の手札から使ったカードを消し、ポイントを加算
+                let updatedMyHand = targetHandArray(currentData.players[myPlayerId].hand);
+                updatedMyHand.splice(myIdx, 1);
+                currentData.players[myPlayerId].hand = updatedMyHand;
+                currentData.players[myPlayerId].score += totalGainedPoints;
+                
+                currentData.log += `⚔️ ${attackPlayerName} が [${attackNum}] で攻撃！ 計 ${totalGainedPoints} 点獲得！\n`;
+                
+                // ターン終了処理も同時に行う
+                advanceTurn(currentData);
+                
+                return currentData;
+            }).then(() => {
+                selectedIndices = [];
+            });
         };
+
+        // 🚪 行動終了（パス）
         window.endTurn = function() {
-            gameState.turn++; const nextRole = ((isLocalMode ? gameState.currentTurnRole : myRole) === "host") ? "guest" : "host"; gameState.currentTurnRole = nextRole;
-            const drawn = Math.floor(Math.random() * 10) + 1;
-            if (nextRole === 'host') gameState.hostHand.push(drawn); else gameState.guestHand.push(drawn);
-            pushLog(`ターン終了。[${drawn}] をドロー！`); selectedIndices = []; saveState(gameState);
+            runTransaction(roomRef, (currentData) => {
+                if (!currentData) return currentData;
+                
+                let activePlayerId = currentData.turnOrder[currentData.currentTurnIdx];
+                let pName = currentData.players[activePlayerId].name;
+                
+                // 1枚ランダムドロー
+                let hand = targetHandArray(currentData.players[activePlayerId].hand);
+                let drawn = Math.floor(Math.random() * 20) + 1;
+                hand.push(drawn);
+                currentData.players[activePlayerId].hand = hand;
+                
+                currentData.log += `🚪 ${pName} はパスしました。[${drawn}] をドロー！\n`;
+                
+                advanceTurn(currentData);
+                return currentData;
+            }).then(() => {
+                selectedIndices = [];
+            });
         };
-        window.opAdd = function() { if (selectedIndices.length !== 2) return alert('2枚選んでください'); let hand = getMyHandArray(), res = hand[selectedIndices[0]] + hand[selectedIndices[1]]; pushLog(`➕ 合成: ${hand[selectedIndices[0]]} + ${hand[selectedIndices[1]]} = [${res}]`); executeReplace2to1(res); };
-        window.opSub = function() { if (selectedIndices.length !== 2) return alert('2枚選んでください'); let hand = getMyHandArray(), res = hand[selectedIndices[0]] - hand[selectedIndices[1]]; if (res <= 0) return alert('0以下は不可'); pushLog(`➖ 引き算: ${hand[selectedIndices[0]]} - ${hand[selectedIndices[1]]} = [${res}]`); executeReplace2to1(res); };
-        window.opDivProduct = function() { if (selectedIndices.length !== 2) return alert('2枚選んでください'); let hand = getMyHandArray(), n1 = hand[selectedIndices[0]], n2 = hand[selectedIndices[1]]; if (n2 === 0) return alert('0除算不可'); let res = Math.floor(n1 / n2) * (n1 % n2); pushLog(`操作A: ${n1}÷${n2} ➡ [${res}]`); executeReplace2to1(res); };
-        window.opDigitSumDiv = function() { if (selectedIndices.length !== 1) return alert('1枚選んでください'); let hand = getMyHandArray(), num = hand[selectedIndices[0]], sum = String(num).split('').reduce((s, d) => s + parseInt(d), 0); if (sum === 0) return; let res = Math.floor(num / sum) * (num % sum); pushLog(`操作B: ${num}÷桁和${sum} ➡ [${res}]`); hand[selectedIndices[0]] = res; setMyHandArray(hand); selectedIndices = []; saveState(gameState); };
-        window.opGcdMul = function() {
-            if (selectedIndices.length !== 2) return alert('2枚選んでください');
-            let hand = getMyHandArray(), X = hand[selectedIndices[0]], Y = hand[selectedIndices[1]], a = X, b = Y;
-            while (b !== 0) { let t = b; b = a % b; a = t; }
-            if (a === 1) return alert('最大公約数が1です'); let res = X * a; pushLog(`操作C: [${X}]×GCD(${a}) ➡ [${res}]`); executeReplace2to1(res);
-        };
-        function executeReplace2to1(newNum) {
-            let hand = getMyHandArray(), firstIdx = Math.min(selectedIndices[0], selectedIndices[1]), secondIdx = Math.max(selectedIndices[0], selectedIndices[1]);
-            hand = hand.filter((_, i) => i !== firstIdx && i !== secondIdx); hand.push(newNum); setMyHandArray(hand); selectedIndices = []; saveState(gameState);
+
+        // ターンを次に進める内部処理
+        function advanceTurn(currentData) {
+            currentData.currentTurnIdx = (currentData.currentTurnIdx + 1) % currentData.turnOrder.length;
+            if (currentData.currentTurnIdx === 0) {
+                currentData.turnCount++;
+            }
         }
-        window.resetRoom = function() { if(confirm("リセットしますか？")) { if (!isLocalMode && roomRef) set(roomRef, null); location.reload(); } };
+        function targetHandArray(handData) {
+            if (!handData) return [];
+            if (Array.isArray(handData)) return handData;
+            return Object.values(handData);
+        }
+
+        // 各種合成コマンド（簡易対応版）
+        window.opAdd = function() { executeOp((a, b) => a + b, "➕ 足し算"); };
+        window.opSub = function() { executeOp((a, b) => a - b, "➖ 引き算", true); };
+        
+        function executeOp(formula, label, checkSub = false) {
+            let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
+            if (selectedIndices.length !== 2) return alert('手札を2枚選んでください');
+            let n1 = myHand[selectedIndices[0]], n2 = myHand[selectedIndices[1]];
+            let res = formula(n1, n2);
+            if (checkSub && res <= 0) return alert('0以下になる引き算はできません');
+            
+            runTransaction(roomRef, (currentData) => {
+                if (!currentData) return currentData;
+                let hand = targetHandArray(currentData.players[myPlayerId].hand);
+                let firstIdx = Math.min(selectedIndices[0], selectedIndices[1]);
+                let secondIdx = Math.max(selectedIndices[0], selectedIndices[1]);
+                hand = hand.filter((_, i) => i !== firstIdx && i !== secondIdx);
+                hand.push(res);
+                currentData.players[myPlayerId].hand = hand;
+                currentData.log += `🔮 ${currentData.players[myPlayerId].name} が合成: ${n1} と ${n2} ➡ [${res}]\n`;
+                return currentData;
+            }).then(() => { selectedIndices = []; });
+        }
+
+        window.resetRoom = function() { if(confirm("部屋をリセットしますか？")) { set(roomRef, null); location.reload(); } };
     </script>
 </head>
 <body>
 <div class="game-container">
-    <h1>数理変換タクティクス (完全修正版)</h1>
-    <div id="error-box" class="error-overlay"></div>
-    <div id="setup-screen" class="setup-panel">
-        <div class="url-box">📢 <b>招待URL:</b> <span id="invite-url"></span></div>
-        <button id="btn-join-host" class="btn-role" style="background:#ef4444;" onclick="selectRole('host')">プレイヤー1 (先攻) として入室</button>
-        <button id="btn-join-guest" class="btn-role" style="background:#f59e0b;" onclick="selectRole('guest')">プレイヤー2 (後攻) として入室</button>
+    <h1>数理変換タクティクス (マルチ・約数奪取版)</h1>
+    
+    <div id="room-setup" class="setup-panel" style="display:none;">
+        <p>何人部屋を作成しますか？</p>
+        <button style="background:#2563eb; color:white; padding:10px 20px; margin:5px;" onclick="createRoom(2)">2人部屋を作る</button>
+        <button style="background:#7c3aed; color:white; padding:10px 20px; margin:5px;" onclick="createRoom; createRoom(3)">3人部屋を作る</button>
+        <button style="background:#10b981; color:white; padding:10px 20px; margin:5px;" onclick="createRoom(4)">4人部屋を作る</button>
     </div>
+
+    <div id="waiting-screen" class="waiting-screen" style="display:none;">
+        <h3>👥 プレイヤーの参加を待っています...</h3>
+        <p style="font-size:24px; font-weight:bold; color:var(--primary);">
+            現在: <span id="current-count">0</span> / <span id="target-count">0</span> 人
+        </p>
+        <div class="url-box">📢 <b>このURLを友達に送ってね:</b> <br><span id="invite-url"></span></div>
+        <button id="btn-auto-join" style="background:#10b981; color:white; display:none; width:100%; padding:12px;" onclick="joinRoom()">この部屋に参戦する</button>
+    </div>
+
     <div id="game-screen" style="display: none;">
-        <div class="pvp-board">
-            <div id="panel-host" class="player-status status-host"><div class="player-header"><div>👤 P1(先攻)</div><div id="host-hp" class="hp-display">HP: 100</div></div><div class="mini-card-container" id="host-hand-display"></div></div>
-            <div id="panel-guest" class="player-status status-guest"><div class="player-header"><div>👤 P2(後攻)</div><div id="guest-hp" class="hp-display">HP: 100</div></div><div class="mini-card-container" id="guest-hand-display"></div></div>
-        </div>
+        <div class="section-title">全プレイヤーの状況</div>
+        <div class="pvp-board" id="pvp-board"></div>
+        
         <div id="turn-info" style="text-align: center; font-weight: bold; margin-bottom: 15px;"></div>
+        
         <div id="hand-section-title" class="section-title">あなたの手札</div>
         <div class="hand-container" id="hand-area"></div>
+        
         <div class="section-title">コマンド</div>
         <div class="actions-grid">
-            <button class="btn-attack" onclick="executeAttack()">⚔️ 選択したカードで相手に攻撃！</button>
-            <button class="btn-main" onclick="endTurn()">🚪 行動終了（ターンを渡す）</button>
-            <button class="btn-op" onclick="opAdd()">➕ 足し算 (2枚)</button>
-            <button class="btn-op" onclick="opSub()">➖ 引き算</button>
-            <button class="btn-op" onclick="opDivProduct()">操作A: 商×余</button>
-            <button class="btn-op" onclick="opDigitSumDiv()">操作B: 桁和</button>
-            <button class="btn-op" style="grid-column: span 2; background: #faf5ff;" onclick="opGcdMul()">🔮 操作C: 最大公約数を掛ける</button>
+            <button class="btn-attack" onclick="executeAttack()">⚔️ 選択したカードの.
+            <button class="btn-main" onclick="endTurn()">🚪 パスして1枚ドロー（ターンを渡す）</button>
+            <button class="btn-op" onclick="opAdd()">➕ 足し算 (2枚選択)</button>
+            <button class="btn-op" onclick="opSub()">➖ 引き算 (2枚選択)</button>
         </div>
+        
         <div class="section-title">バトルログ</div>
         <div class="log-container" id="log-area"></div>
-        <button onclick="resetRoom()" style="margin-top: 15px; width: 100%; background: #64748b; color: white;">🔄 試合をリセット</button>
+        <button onclick="resetRoom()" style="margin-top: 15px; width: 100%; background: #64748b; color: white;">🔄 試合を完全にリセット</button>
     </div>
 </div>
 </body>
