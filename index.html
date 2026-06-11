@@ -220,7 +220,7 @@
                 const div = document.createElement('div');
                 div.className = "player-status" + (pid === activePlayerId ? ' active-turn' : '') + (pid === myPlayerId ? ' my-status' : '');
                 
-                const handArr = p.hand ? (Array.isArray(p.hand) ? p.hand : Object.values(p.hand)) : [];
+                const handArr = targetHandArray(p.hand);
                 
                 div.innerHTML = `
                     <div class="player-header">
@@ -253,7 +253,7 @@
 
             document.querySelectorAll('.actions-grid button').forEach(btn => { btn.disabled = !isMyTurn; });
 
-            const myHandArr = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
+            const myHandArr = gameState.players[myPlayerId] ? targetHandArray(gameState.players[myPlayerId].hand) : [];
             const handArea = document.getElementById('hand-area'); 
             if(handArea) {
                 handArea.innerHTML = '';
@@ -290,7 +290,7 @@
                 return alert('【ルール】ゲームの最初の1周目（全員の1ターン目）は攻撃できません！合成などで手札を整えてください。');
             }
 
-            let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
+            let myHand = gameState.players[myPlayerId] ? targetHandArray(gameState.players[myPlayerId].hand) : [];
             if (selectedIndices.length !== 1) return alert('攻撃に使う手札を1枚選んでください。');
             
             let myIdx = selectedIndices[0];
@@ -309,8 +309,7 @@
                 Object.keys(currentData.players).forEach(pid => {
                     if (pid === myPlayerId) return;
                     
-                    let targetHand = currentData.players[pid].hand ? (Array.isArray(currentData.players[pid].hand) ? currentData.players[pid].hand : Object.values(currentData.players[pid].hand)) : [];
-                    
+                    let targetHand = targetHandArray(currentData.players[pid].hand);
                     let keptCards = [];
                     targetHand.forEach(cardNum => {
                         if (cardNum % attackNum === 0) {
@@ -332,6 +331,7 @@
                 return currentData;
             }).then(() => {
                 selectedIndices = [];
+                updateDOM();
             });
         };
 
@@ -347,6 +347,7 @@
                 return currentData;
             }).then(() => {
                 selectedIndices = [];
+                updateDOM();
             });
         };
 
@@ -377,9 +378,9 @@
             }, "操作A: 商×余", false, true);
         };
 
-        // 🔢 操作B: 桁和 (商と余りを掛け算せず、独立して配列に追加するようバグを修正)
+        // 🔢 操作B: 桁和（完全分裂仕様・インデックスバグ排除版）
         window.opDigitSumDiv = function() {
-            let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
+            let myHand = gameState.players[myPlayerId] ? targetHandArray(gameState.players[myPlayerId].hand) : [];
             if (selectedIndices.length !== 1) return alert('手札を1枚選んでください');
             
             let targetIdx = selectedIndices[0];
@@ -395,14 +396,14 @@
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
                 
-                // 1. 元のカードを確実に削除
+                // 元の数値を削除
                 hand.splice(targetIdx, 1);
                 
-                // 2. 商の数値を単体のカードとして追加
+                // 商を独立したカードとして追加
                 hand.push(quotient);
                 
                 let logMsg = "";
-                // 3. 余りが0より大きい場合のみ、余りの数値も独立したカードとして追加
+                // 余りが0より大きい場合のみ、余りも独立した別のカードとして追加
                 if (remainder > 0) {
                     hand.push(remainder);
                     logMsg = `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] を桁和(${sum})で分解 ➡ [${quotient}] と [${remainder}] の2枚に分裂しました！\n`;
@@ -413,11 +414,14 @@
                 currentData.players[myPlayerId].hand = hand;
                 currentData.log += logMsg;
                 return currentData;
-            }).then(() => { selectedIndices = []; });
+            }).then(() => { 
+                selectedIndices = []; 
+                updateDOM();
+            });
         };
 
         window.opGcdMul = function() {
-            let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
+            let myHand = gameState.players[myPlayerId] ? targetHandArray(gameState.players[myPlayerId].hand) : [];
             if (selectedIndices.length !== 2) return alert('手札を2枚選んでください');
             
             let X = myHand[selectedIndices[0]];
@@ -435,20 +439,33 @@
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
+                
                 let firstIdx = Math.min(selectedIndices[0], selectedIndices[1]);
-                let secondIdx = Math.max(selectedIndices[0], secondIndices[1]);
-                hand = hand.filter((_, i) => i !== firstIdx && i !== secondIdx);
+                let secondIdx = Math.max(selectedIndices[0], selectedIndices[1]);
+                
+                // インデックスのズレを防ぐため後ろから削除
+                hand.splice(secondIdx, 1);
+                hand.splice(firstIdx, 1);
+                
                 hand.push(res);
                 currentData.players[myPlayerId].hand = hand;
                 currentData.log += `🔮 ${currentData.players[myPlayerId].name} が操作C(GCD): [${X}] と [${Y}] ➡ [${res}]\n`;
                 return currentData;
-            }).then(() => { selectedIndices = []; });
+            }).then(() => { 
+                selectedIndices = []; 
+                updateDOM();
+            });
         };
         
         function executeOp(formula, label, checkSub = false, isDivProd = false) {
-            let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
+            let myHand = gameState.players[myPlayerId] ? targetHandArray(gameState.players[myPlayerId].hand) : [];
             if (selectedIndices.length !== 2) return alert('手札を2枚選んでください');
-            let n1 = myHand[selectedIndices[0]], n2 = myHand[selectedIndices[1]];
+            
+            let firstIdx = Math.min(selectedIndices[0], selectedIndices[1]);
+            let secondIdx = Math.max(selectedIndices[0], selectedIndices[1]);
+            
+            let n1 = myHand[selectedIndices[0]];
+            let n2 = myHand[selectedIndices[1]];
             
             let res = formula(n1, n2);
             if (isDivProd && res === -1) return alert('0で割ることはできません。');
@@ -457,14 +474,19 @@
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
                 let hand = targetHandArray(currentData.players[myPlayerId].hand);
-                let firstIdx = Math.min(selectedIndices[0], selectedIndices[1]);
-                let secondIdx = Math.max(selectedIndices[0], secondIndices[1]);
-                hand = hand.filter((_, i) => i !== firstIdx && i !== secondIdx);
+                
+                // インデックスのズレを防ぐため、必ず大きいインデックス（後ろ）から削除
+                hand.splice(secondIdx, 1);
+                hand.splice(firstIdx, 1);
+                
                 hand.push(res);
                 currentData.players[myPlayerId].hand = hand;
                 currentData.log += `🔮 ${currentData.players[myPlayerId].name} が合成(${label}): ${n1} と ${n2} ➡ [${res}]\n`;
                 return currentData;
-            }).then(() => { selectedIndices = []; });
+            }).then(() => { 
+                selectedIndices = []; 
+                updateDOM();
+            });
         }
 
         window.resetRoom = function() { if(confirm("部屋をリセットしますか？")) { set(roomRef, null); location.reload(); } };
