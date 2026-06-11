@@ -76,7 +76,8 @@
         let gameState = {};
         let myPlayerId = null; 
         let selectedIndices = [];
-        
+        let localTurnDrawn = false; // 自分の現在のターンで既にドロー処理をしたかどうかのローカルフラグ
+
         window.addEventListener('DOMContentLoaded', () => { 
             document.getElementById('invite-url').innerText = window.location.href; 
         });
@@ -108,7 +109,17 @@
             } else if (gameState.status === 'playing') {
                 document.getElementById('waiting-screen').style.display = 'none';
                 document.getElementById('game-screen').style.display = 'block';
-                if (myPlayerId) updateDOM();
+                if (myPlayerId) {
+                    // ★【新仕様】2ターン目以降かつ、自分の手番が回ってきた瞬間に自動で1枚ドローする（未処理の場合のみ）
+                    const activePlayerId = gameState.turnOrder[gameState.currentTurnIdx];
+                    if (activePlayerId === myPlayerId && gameState.turnCount >= 2 && !localTurnDrawn) {
+                        localTurnDrawn = true; // 重複実行防止
+                        triggerStartTurnDraw();
+                    } else if (activePlayerId !== myPlayerId) {
+                        localTurnDrawn = false; // 相手のターン中はフラグをリセット
+                    }
+                    updateDOM();
+                }
             }
         }, (error) => {
             setDebugStatus('error', `通信拒否: ${error.message}`);
@@ -154,7 +165,7 @@
                 
                 if (Object.keys(currentData.players).length == currentData.maxPlayers) {
                     currentData.status = 'playing';
-                    currentData.log += "【システム】全員揃いました！ゲームを開始します。\n";
+                    currentData.log += "【システム】全員揃いました！ゲームを開始します（1ターン目はドローなし）。\n";
                 } else {
                     currentData.log += `【システム】プレイヤー ${currentCount + 1} が入室しました。\n`;
                 }
@@ -164,6 +175,23 @@
                 alert(`入室エラー: ${err.message}`);
             });
         };
+
+        // ターン開始時に自動でカードを引き、ログに記録するトランザクション
+        function triggerStartTurnDraw() {
+            runTransaction(roomRef, (currentData) => {
+                if (!currentData) return currentData;
+                const activePlayerId = currentData.turnOrder[currentData.currentTurnIdx];
+                if (activePlayerId !== myPlayerId) return currentData; // 念のため自分自身か再確認
+                
+                let hand = targetHandArray(currentData.players[myPlayerId].hand);
+                let drawn = Math.floor(Math.random() * 20) + 1;
+                hand.push(drawn);
+                
+                currentData.players[myPlayerId].hand = hand;
+                currentData.log += `📥 ターン開始！ ${currentData.players[myPlayerId].name} は [${drawn}] をドローしました。\n`;
+                return currentData;
+            });
+        }
 
         function updateDOM() {
             const board = document.getElementById('pvp-board');
@@ -285,16 +313,10 @@
         window.endTurn = function() {
             runTransaction(roomRef, (currentData) => {
                 if (!currentData) return currentData;
-                
                 let activePlayerId = currentData.turnOrder[currentData.currentTurnIdx];
                 let pName = currentData.players[activePlayerId].name;
                 
-                let hand = targetHandArray(currentData.players[activePlayerId].hand);
-                let drawn = Math.floor(Math.random() * 20) + 1;
-                hand.push(drawn);
-                currentData.players[activePlayerId].hand = hand;
-                
-                currentData.log += `🚪 ${pName} はパスしました。[${drawn}] をドロー！\n`;
+                currentData.log += `🚪 ${pName} は何もせずパスしました。（次のプレイヤーへ）\n`;
                 
                 advanceTurn(currentData);
                 return currentData;
@@ -309,20 +331,88 @@
                 currentData.turnCount++;
             }
         }
+        
         function targetHandArray(handData) {
             if (!handData) return [];
             if (Array.isArray(handData)) return handData;
             return Object.values(handData);
         }
 
+        // ==========================================
+        // 🔮 数理特殊変換・合成コマンド群 (移植＆マルチ対応版)
+        // ==========================================
         window.opAdd = function() { executeOp((a, b) => a + b, "➕ 足し算"); };
         window.opSub = function() { executeOp((a, b) => a - b, "➖ 引き算", true); };
         
-        function executeOp(formula, label, checkSub = false) {
+        // 操作A: 商 × 余 (2枚選択)
+        window.opDivProduct = function() {
+            executeOp((a, b) => {
+                if (b === 0) return -1; // 0除算防止用フラグ
+                return Math.floor(a / b) * (a % b);
+            }, "操作A: 商×余", false, true);
+        };
+
+        // 操作B: 桁和合成 (1枚選択)
+        window.opDigitSumDiv = function() {
+            let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
+            if (selectedIndices.length !== 1) return alert('手札を1枚選んでください');
+            
+            let num = myHand[selectedIndices[0]];
+            let sum = String(num).split('').reduce((s, d) => s + parseInt(d), 0);
+            if (sum === 0) return alert('桁の和が0のため変換できません');
+            
+            let res = Math.floor(num / sum) * (num % sum);
+            
+            runTransaction(roomRef, (currentData) => {
+                if (!currentData) return currentData;
+                let hand = targetHandArray(currentData.players[myPlayerId].hand);
+                hand[selectedIndices[0]] = res; // 選択したカードを上書き
+                currentData.players[myPlayerId].hand = hand;
+                currentData.log += `🔮 ${currentData.players[myPlayerId].name} が操作B(桁和): [${num}] ➡ 桁和(${sum}) ➡ [${res}]\n`;
+                return currentData;
+            }).then(() => { selectedIndices = []; });
+        };
+
+        // 操作C: 最大公約数（GCD）掛け (2枚選択)
+        window.opGcdMul = function() {
+            let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
+            if (selectedIndices.length !== 2) return alert('手札を2枚選んでください');
+            
+            let X = myHand[selectedIndices[0]];
+            let Y = myHand[selectedIndices[1]];
+            
+            // ユークリッドの互除法で最大公約数を計算
+            let a = X, b = Y;
+            while (b !== 0) {
+                let t = b; b = a % b; a = t;
+            }
+            let gcd = a;
+            if (gcd === 1) return alert('2枚の最大公約数が 1 のため操作Cは使えません');
+            
+            let res = X * gcd;
+            
+            runTransaction(roomRef, (currentData) => {
+                if (!currentData) return currentData;
+                let hand = targetHandArray(currentData.players[myPlayerId].hand);
+                let firstIdx = Math.min(selectedIndices[0], selectedIndices[1]);
+                let secondIdx = Math.max(selectedIndices[0], selectedIndices[1]);
+                // 2枚を取り除く
+                hand = hand.filter((_, i) => i !== firstIdx && i !== secondIdx);
+                hand.push(res);
+                currentData.players[myPlayerId].hand = hand;
+                currentData.log += `🔮 ${currentData.players[myPlayerId].name} が操作C(GCD): [${X}] と [${Y}] ➡ GCD(${gcd})を掛けて [${res}]\n`;
+                return currentData;
+            }).then(() => { selectedIndices = []; });
+        };
+        
+        // 汎用2枚合成処理（足し算、引き算、商×余で使用）
+        function executeOp(formula, label, checkSub = false, isDivProd = false) {
             let myHand = gameState.players[myPlayerId].hand ? (Array.isArray(gameState.players[myPlayerId].hand) ? gameState.players[myPlayerId].hand : Object.values(gameState.players[myPlayerId].hand)) : [];
             if (selectedIndices.length !== 2) return alert('手札を2枚選んでください');
             let n1 = myHand[selectedIndices[0]], n2 = myHand[selectedIndices[1]];
+            
             let res = formula(n1, n2);
+            if (isDivProd && res === -1) return alert('0で割ることはできません。選ぶ順番を変えてください。');
             if (checkSub && res <= 0) return alert('0以下になる引き算はできません');
             
             runTransaction(roomRef, (currentData) => {
@@ -333,7 +423,7 @@
                 hand = hand.filter((_, i) => i !== firstIdx && i !== secondIdx);
                 hand.push(res);
                 currentData.players[myPlayerId].hand = hand;
-                currentData.log += `🔮 ${currentData.players[myPlayerId].name} が合成: ${n1} と ${n2} ➡ [${res}]\n`;
+                currentData.log += `🔮 ${currentData.players[myPlayerId].name} が合成(${label}): ${n1} と ${n2} ➡ [${res}]\n`;
                 return currentData;
             }).then(() => { selectedIndices = []; });
         }
@@ -370,15 +460,21 @@
         <div class="section-title">全プレイヤーの状況</div>
         <div class="pvp-board" id="pvp-board"></div>
         <div id="turn-info" style="text-align: center; font-weight: bold; margin-bottom: 15px;"></div>
+        
         <div class="section-title">あなたの手札</div>
         <div class="hand-container" id="hand-area"></div>
+        
         <div class="section-title">コマンド</div>
         <div class="actions-grid">
             <button class="btn-attack" onclick="executeAttack()">⚔️ 選択したカードの約数を相手全員から強奪！</button>
-            <button class="btn-main" onclick="endTurn()">🚪 パスして1枚ドロー（ターンを渡す）</button>
+            <button class="btn-main" onclick="endTurn()">🚪 何もせずパス（ターンを回す）</button>
             <button class="btn-op" onclick="opAdd()">➕ 足し算 (2枚選択)</button>
             <button class="btn-op" onclick="opSub()">➖ 引き算 (2枚選択)</button>
+            <button class="btn-op" onclick="opDivProduct()">🧩 操作A: 商×余 (2枚選択)</button>
+            <button class="btn-op" onclick="opDigitSumDiv()">🔢 操作B: 桁和 (1枚選択)</button>
+            <button class="btn-op" style="grid-column: span 2; background: #faf5ff;" onclick="opGcdMul()">🔮 操作C: 最大公約数を掛ける (2枚選択)</button>
         </div>
+        
         <div class="section-title">バトルログ</div>
         <div class="log-container" id="log-area"></div>
         <button onclick="resetRoom()" style="margin-top: 15px; width: 100%; background: #64748b; color: white;">🔄 試合を完全にリセット</button>
