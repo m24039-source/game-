@@ -38,7 +38,11 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, set, onValue, update, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+        
+        // 【重要】ここにあなた専用のRealtime DatabaseのURLを入れます
+        // もしエラーになる場合は、自動的に「ローカル対戦検証モード」に切り替わります
         const firebaseConfig = { databaseURL: "https://math-tactics-default-rtdb.firebaseio.com/" };
+        
         let db, roomRef, roomId = window.location.hash.substring(1);
         if (!roomId) { roomId = "room_" + Math.random().toString(36).substring(2, 11); window.location.hash = roomId; }
         function showError(message) { const errDiv = document.getElementById('error-box'); if (errDiv) { errDiv.innerText = message; errDiv.style.display = 'block'; } }
@@ -56,7 +60,7 @@
                 }
             }, (error) => { showError("【接続調整】ソロプレイ/ローカル対戦モードに自動で切り替えました。"); enableLocalFallback(); });
         } catch (e) { showError("【初期化完了】ローカル検証モードを開始します。"); enableLocalFallback(); }
-        const initialGameState = { hostHP: 100, guestHP: 100, hostHand: [5, 6, 8], guestHand: [5, 6, 8], turn: 1, currentTurnRole: "host", hostOnline: false, guestOnline: false, log: "【システム】ゲームが開始されました。\\n" };
+        const initialGameState = { hostHP: 100, guestHP: 100, hostHand: [5, 6, 8], guestHand: [5, 6, 8], turn: 1, currentTurnRole: "host", hostOnline: false, guestOnline: false, log: "【システム】ゲームが開始されました。\n" };
         let gameState = { ...initialGameState }, myRole = null, selectedIndices = [], isLocalMode = false;
         function safeArray(data) { if (!data) return []; if (Array.isArray(data)) return data; return Object.values(data); }
         function enableLocalFallback() { isLocalMode = true; document.getElementById('btn-join-host').disabled = false; document.getElementById('btn-join-guest').disabled = false; }
@@ -118,12 +122,12 @@
             const logArea = document.getElementById('log-area'); logArea.innerText = gameState.log; logArea.scrollTop = logArea.scrollHeight;
         }
         function renderMiniHand(elementId, handArray) { const container = document.getElementById(elementId); container.innerHTML = ''; (handArray || []).forEach(num => { const span = document.createElement('span'); span.className = 'mini-card'; span.innerText = num; container.appendChild(span); }); }
-        function pushLog(msg) { const name = (isLocalMode ? gameState.currentTurnRole : myRole) === 'host' ? 'P1' : 'P2'; gameState.log += `[${name}] ${msg}\\n`; }
+        function pushLog(msg) { const name = (isLocalMode ? gameState.currentTurnRole : myRole) === 'host' ? 'P1' : 'P2'; gameState.log += `[${name}] ${msg}\n`; }
         function getMyHandArray() { return ((isLocalMode ? gameState.currentTurnRole : myRole) === 'host') ? gameState.hostHand : gameState.guestHand; }
         function setMyHandArray(arr) { if (((isLocalMode ? gameState.currentTurnRole : myRole) === 'host')) gameState.hostHand = arr; else gameState.guestHand = arr; }
         window.executeAttack = function() {
-            if (selectedIndices.length !== 1) return alert('手札を1枚選んでください。');
-            let hand = getMyHandArray(), myIdx = selectedIndices[0], damage = hand[myIdx];
+            let hand = getMyHandArray(); if (selectedIndices.length !== 1) return alert('手札を1枚選んでください。');
+            let myIdx = selectedIndices[0], damage = hand[myIdx];
             if ((isLocalMode ? gameState.currentTurnRole : myRole) === 'host') { gameState.guestHP = Math.max(0, gameState.guestHP - damage); gameState.hostHand.splice(myIdx, 1); }
             else { gameState.hostHP = Math.max(0, gameState.hostHP - damage); gameState.guestHand.splice(myIdx, 1); }
             pushLog(`⚔️ 相手に ${damage} ダメージ！`); selectedIndices = []; saveState(gameState);
