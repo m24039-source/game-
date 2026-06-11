@@ -3,15 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>数理変換タクティクス - マルチ得点奪取版</title>
+    <title>数理変換タクティクス - デバッグ機能付き</title>
     <style>
         :root { --primary: #2563eb; --success: #10b981; --danger: #ef4444; --bg: #f8fafc; --card-bg: #ffffff; --text: #1e293b; --border: #e2e8f0; }
         body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 10px; display: flex; justify-content: center; }
         .game-container { max-width: 100%; width: 100%; background: var(--card-bg); border-radius: 16px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); padding: 16px; box-sizing: border-box; }
         h1 { text-align: center; font-size: 20px; margin-top: 0; color: #0f172a; }
+        
+        /* 🛠️ デバッグ用特別スタイル */
+        .debug-panel { background: #fee2e2; border: 2px dashed #f87171; color: #991b1b; padding: 12px; border-radius: 8px; margin-bottom: 15px; font-size: 13px; font-family: monospace; }
+        .status-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-weight: bold; color: white; font-size: 11px; margin-bottom: 5px; }
+        .status-loading { background: #64748b; }
+        .status-success { background: #10b981; }
+        .status-error { background: #ef4444; }
+
         .setup-panel { background: #f1f5f9; padding: 15px; border-radius: 12px; text-align: center; margin-bottom: 15px; }
-        .btn-role { padding: 12px 20px; margin: 8px; font-size: 14px; color: white; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; width: 80%; max-width: 300px; transition: opacity 0.2s; }
-        .btn-role:disabled { background: #cbd5e1 !important; color: #94a3b8 !important; cursor: not-allowed; }
         .room-select { margin-bottom: 15px; padding: 10px; background: #e0f2fe; border-radius: 8px; font-weight: bold; }
         .pvp-board { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 15px; }
         .player-status { padding: 12px; border-radius: 8px; border: 2px solid transparent; background: #f8fafc; border-color: var(--border); transition: all 0.3s; }
@@ -39,6 +45,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, set, onValue, update, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
         
+        // 宛先URL
         const firebaseConfig = { 
             databaseURL: "https://math-tactics-default-rtdb.firebaseio.com/" 
         };
@@ -46,9 +53,31 @@
         let db, roomRef, roomId = window.location.hash.substring(1);
         if (!roomId) { roomId = "room_" + Math.random().toString(36).substring(2, 11); window.location.hash = roomId; }
         
-        const app = initializeApp(firebaseConfig);
-        db = getDatabase(app);
-        roomRef = ref(db, 'rooms/' + roomId);
+        function setDebugStatus(status, text) {
+            const badge = document.getElementById('debug-badge');
+            const detail = document.getElementById('debug-detail');
+            badge.className = "status-badge status-" + status;
+            badge.innerText = status === 'success' ? '🟢 接続成功' : (status === 'error' ? '🔴 接続エラー' : '🟡 通信中...');
+            detail.innerText = text;
+        }
+
+        try {
+            const app = initializeApp(firebaseConfig);
+            db = getDatabase(app);
+            roomRef = ref(db, 'rooms/' + roomId);
+            
+            // 📡 接続テスト用：Firebaseの特殊な接続状況監視ノード
+            const connectedRef = ref(db, ".info/connected");
+            onValue(connectedRef, (snap) => {
+                if (snap.val() === true) {
+                    setDebugStatus('success', `Firebaseサーバーに正常に直結しました。部屋ID: ${roomId}`);
+                } else {
+                    setDebugStatus('loading', "Firebaseサーバーを探しています。URLが間違っているか、オフラインです...");
+                }
+            });
+        } catch (e) {
+            setDebugStatus('error', `初期化失敗(コード記述ミス等): ${e.message}`);
+        }
         
         let gameState = {};
         let myPlayerId = null; 
@@ -58,6 +87,7 @@
             document.getElementById('invite-url').innerText = window.location.href; 
         });
 
+        // データベース監視（エラーキャッチ付きに強化）
         onValue(roomRef, (snapshot) => {
             const data = snapshot.val();
             if (!data) {
@@ -88,6 +118,9 @@
                 document.getElementById('game-screen').style.display = 'block';
                 if (myPlayerId) updateDOM();
             }
+        }, (error) => {
+            // 🚨 重要：ルール（true/false）で弾かれた場合はここに通知が来ます！
+            setDebugStatus('error', `Firebaseから通信が拒否されました(ルール設定ミスの可能性): ${error.message}`);
         });
 
         window.createRoom = function(maxPlayers) {
@@ -102,6 +135,8 @@
             };
             set(roomRef, initialData).then(() => {
                 joinRoom();
+            }).catch(err => {
+                alert(`部屋作成失敗: ${err.message}`);
             });
         };
 
@@ -133,6 +168,8 @@
                 }
                 
                 return currentData;
+            }).catch(err => {
+                alert(`入室エラー(書き込み権限なし等): ${err.message}`);
             });
         };
 
@@ -242,8 +279,6 @@
                 
                 advanceTurn(currentData);
                 return currentData;
-            }).then(() => {
-                selectedIndices = [];
             });
         };
 
@@ -263,8 +298,6 @@
                 
                 advanceTurn(currentData);
                 return currentData;
-            }).then(() => {
-                selectedIndices = [];
             });
         };
 
@@ -300,7 +333,7 @@
                 currentData.players[myPlayerId].hand = hand;
                 currentData.log += `🔮 ${currentData.players[myPlayerId].name} が合成: ${n1} と ${n2} ➡ [${res}]\n`;
                 return currentData;
-            }).then(() => { selectedIndices = []; });
+            });
         }
 
         window.resetRoom = function() { if(confirm("部屋をリセットしますか？")) { set(roomRef, null); location.reload(); } };
@@ -308,7 +341,13 @@
 </head>
 <body>
 <div class="game-container">
-    <h1>数理変換タクティクス (マルチ・約数奪取版)</h1>
+    <h1>数理変換タクティクス (デバッグモード)</h1>
+    
+    <div class="debug-panel">
+        <div><b>📡 リアルタイム接続テスト:</b></div>
+        <span id="debug-badge" class="status-badge status-loading">🟡 通信中...</span>
+        <div id="debug-detail" style="margin-top:5px; color:#555;">接続をテストしています...</div>
+    </div>
     
     <div id="room-setup" class="setup-panel" style="display:none;">
         <p>何人部屋を作成しますか？</p>
@@ -329,20 +368,7 @@
     <div id="game-screen" style="display: none;">
         <div class="section-title">全プレイヤーの状況</div>
         <div class="pvp-board" id="pvp-board"></div>
-        
         <div id="turn-info" style="text-align: center; font-weight: bold; margin-bottom: 15px;"></div>
-        
-        <div id="hand-section-title" class="section-title">あなたの手札</div>
-        <div class="hand-container" id="hand-area"></div>
-        
-        <div class="section-title">コマンド</div>
-        <div class="actions-grid">
-            <button class="btn-attack" onclick="executeAttack()">⚔️ 選択したカードの約数を相手全員から強奪！</button>
-            <button class="btn-main" onclick="endTurn()">🚪 パスして1枚ドロー（ターンを渡す）</button>
-            <button class="btn-op" onclick="opAdd()">➕ 足し算 (2枚選択)</button>
-            <button class="btn-op" onclick="opSub()">➖ 引き算 (2枚選択)</button>
-        </div>
-        
         <div class="section-title">バトルログ</div>
         <div class="log-container" id="log-area"></div>
         <button onclick="resetRoom()" style="margin-top: 15px; width: 100%; background: #64748b; color: white;">🔄 試合を完全にリセット</button>
