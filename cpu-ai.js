@@ -1,15 +1,15 @@
 // ==========================================
 // 数理変換タクティクス：CPU（AI）思考エンジン
-// 【TensorFlow.js仕様完全適合・最終修正版】
+// 【GitHub Pages直接通信・完全勝訴版】
 // ==========================================
 import { runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
 // AIの脳みそ（ニューラルネットワークモデル）を保持する変数
 let aiNeuralModel = null;
-let isModelLoading = false; // 二重ロードを防ぐフラグ
+let isModelLoading = false;
 
 /**
- * 📥 1. 脳みその構造データをメモリ上に直接展開する
+ * 📥 1. GitHub Pages上にある本物のmodel.jsonをURLから直接一本釣りする
  */
 export async function loadBrain() {
     if (aiNeuralModel) return true; // すでにロード済みの場合はスキップ
@@ -17,63 +17,20 @@ export async function loadBrain() {
     
     isModelLoading = true;
     try {
-        // TensorFlow.jsが100%パースできる形式に微修正したモデル構造
-        const modelJsonData = {
-            "format": "layers-model", 
-            "generatedBy": "keras v3.13.2", 
-            "convertedBy": "TensorFlow.js Converter v4.22.0", 
-            "modelTopology": {
-                "keras_version": "3.13.2", 
-                "backend": "tensorflow", 
-                "model_config": {
-                    "class_name": "Sequential", 
-                    "config": {
-                        "name": "sequential", 
-                        "trainable": true, 
-                        "layers": [
-                            // 💡 修正のキモ：batch_shape を batchInputShape に変更し、確実にパースさせます
-                            {
-                                "class_name": "InputLayer", 
-                                "config": {
-                                    "batchInputShape": [null, 30], 
-                                    "dtype": "float32", 
-                                    "sparse": false, 
-                                    "ragged": false, 
-                                    "name": "input_layer"
-                                }
-                            }, 
-                            {"class_name": "Dense", "config": {"name": "dense", "trainable": true, "units": 64, "activation": "relu", "use_bias": true}}, 
-                            {"class_name": "Dense", "config": {"name": "dense_1", "trainable": true, "units": 32, "activation": "relu", "use_bias": true}}, 
-                            {"class_name": "Dense", "config": {"name": "dense_2", "trainable": true, "units": 3, "activation": "linear", "use_bias": true}}
-                        ]
-                    }
-                }
-            }, 
-            "weightsManifest": [{
-                // 重みバイナリはGitHubから絶対パスで一本釣り
-                "paths": ["https://m24039-source.github.io/game-/tfjs_model/group1-shard1of1.bin"], 
-                "weights": [
-                    {"name": "sequential/dense/kernel", "shape": [30, 64], "dtype": "float32"}, 
-                    {"name": "sequential/dense/bias", "shape": [64], "dtype": "float32"}, 
-                    {"name": "sequential/dense_1/kernel", "shape": [64, 32], "dtype": "float32"}, 
-                    {"name": "sequential/dense_1/bias", "shape": [32], "dtype": "float32"}, 
-                    {"name": "sequential/dense_2/kernel", "shape": [32, 3], "dtype": "float32"}, 
-                    {"name": "sequential/dense_2/bias", "shape": [3], "dtype": "float32"}
-                ]
-            }]
-        };
+        // 💡 あなたのGitHub Pagesの絶対パスを直接叩いて、ファイルをロードさせます
+        // 末尾にダミーのタイムスタンプ(?t=...)を付けることで、ブラウザの頑固なキャッシュを強制破壊します
+        const modelUrl = "https://m24039-source.github.io/game-/tfjs_model/model.json?t=" + Date.now();
         
-        // メモリ上でモデルを安全に復元
-        aiNeuralModel = await tf.loadLayersModel(tf.io.fromMemory(
-            modelJsonData.modelTopology,
-            modelJsonData.weightsManifest
-        ));
+        console.log("📡 [AI] モデルの直接通信を開始します... URL:", modelUrl);
+        
+        // 正真正銘、本物のファイルを読み込み
+        aiNeuralModel = await tf.loadLayersModel(modelUrl);
 
-        console.log("🧠 [AI] 思考エンジンの初期化に完全成功しました！");
+        console.log("🏆 [AI] 脳みそファイルの読み込みとネットワークの構築に完全成功しました！");
         isModelLoading = false;
         return true;
     } catch (error) {
-        console.error("⚠️ [AI] モデルの復元に失敗:", error);
+        console.error("⚠️ [AI] ファイルの読み込みに失敗しました。パスやGitHubの公開状態を確認してください:", error);
         isModelLoading = false;
         return false;
     }
@@ -167,7 +124,7 @@ export function executeCPUTurn(roomRef, cpuId) {
             }
         }
 
-        // カテゴリ2：高度な合成（操作C）
+        // カテゴリ2：高度な合成
         if (bestAction.type === "pass" && predictedActionCategory === 2) {
             if (cpuHand.length >= 2) {
                 for (let i = 0; i < cpuHand.length; i++) {
