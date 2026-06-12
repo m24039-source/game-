@@ -61,7 +61,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, set, onValue, update, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
         
-        // 💡 キャッシュを強制破壊するためにバージョンを ?v=5 に変更
+        // 💡 キャッシュを強制破壊するためにバージョン識別子を明記
         import { executeCPUTurn, loadBrain } from "./cpu-ai.js?v=5";
         
         const firebaseConfig = { databaseURL: "https://math-tactics-default-rtdb.firebaseio.com/" };
