@@ -1,112 +1,113 @@
 // ==========================================
-// 🚨 スマホ用・緊急エラー監視ログ（最上部に配置）
+// 📺 スマホ画面直結型：デバッグログ出力システム
 // ==========================================
+function logToScreen(message, isError = false) {
+    let debugDiv = document.getElementById('ai-debug-log');
+    if (!debugDiv) {
+        // 画面の最下部にログ表示用の黒いボックスを強制的に作ります
+        debugDiv = document.createElement('div');
+        debugDiv.id = 'ai-debug-log';
+        debugDiv.style.position = 'fixed';
+        debugDiv.style.bottom = '0';
+        debugDiv.style.left = '0';
+        debugDiv.style.width = '100%';
+        debugDiv.style.height = '150px';
+        debugDiv.style.backgroundColor = 'rgba(0,0,0,0.85)';
+        debugDiv.style.color = '#00ff00';
+        debugDiv.style.fontFamily = 'monospace';
+        debugDiv.style.fontSize = '12px';
+        debugDiv.style.overflowY = 'scroll';
+        debugDiv.style.padding = '10px';
+        debugDiv.style.boxSizing = 'border-box';
+        debugDiv.style.zIndex = '99999';
+        debugDiv.style.pointerEvents = 'none'; // ゲームの邪魔をしない
+        document.body.appendChild(debugDiv);
+    }
+    const line = document.createElement('div');
+    if (isError) line.style.color = '#ff3333';
+    line.innerText = `[${new Date().toLocaleTimeString()}] ${message}`;
+    debugDiv.appendChild(line);
+    debugDiv.scrollTop = debugDiv.scrollHeight;
+}
+
+// 画面全体の致命的エラーを捕まえて画面に表示
 window.addEventListener('error', function(e) {
-    alert("🚨 JavaScriptでエラーが発生しました！\n" + e.message + "\n場所: " + e.filename + " (" + e.lineno + "行目)");
+    logToScreen(`🚨 JSクラッシュ: ${e.message} (${e.filename}:${e.lineno})`, true);
 });
 
-// グローバル変数としてモデルを保持
+// グローバル変数
 let aiModel = null;
-let isAIBrainLoading = false; // 二重ロード防止用フラグ
+let isAIBrainLoading = false;
 
 /**
- * 🧠 1. AIの脳みそ（model.json）を非同期でロードする関数
- * Keras 3形式のJSON構造をブラウザ（TF.js）が読める形に完全クレンジングします。
+ * 🧠 1. AIの脳みそロード関数
+ * ※ゲーム開始を邪魔しないよう、完全に裏方で処理させます。
  */
 async function loadAIBrain() {
-    // 既にロード中、またはロード済みの場合はスキップ
     if (aiModel || isAIBrainLoading) return aiModel;
-    
     isAIBrainLoading = true;
+    
     const modelUrl = 'https://m24039-source.github.io/game-/tfjs_model/model.json'; 
+    logToScreen("🧠 脳みそファイルのダウンロードを開始します...");
 
     try {
-        console.log("🧠 [TF.js] Keras 3互換性パッチを適用した特殊ロードを開始します...");
-
-        // ① JSONファイルを直接テキストとして取得
         const response = await fetch(modelUrl);
-        if (!response.ok) {
-            throw new Error(`モデルファイルの取得に失敗しました (Status: ${response.status})`);
-        }
+        if (!response.ok) throw new Error(`HTTPエラー! ステータス: ${response.status}`);
         const modelJson = await response.json();
 
-        // ② 古いTF.jsが there はじく「Keras 3特有のオブジェクト」を全自動で消去・置換
+        // Keras 3形式のノイズをクレンジング
         if (modelJson && modelJson.modelTopology && modelJson.modelTopology.model_config) {
-            const config = modelJson.modelTopology.model_config;
-            const layers = config.config.layers || [];
-            
+            const layers = modelJson.modelTopology.model_config.config.layers || [];
             layers.forEach(layer => {
-                // 入力層の「batch_shape」を古いTF.js用の「batch_input_shape」に翻訳
-                if (layer.class_name === 'InputLayer' && layer.config) {
-                    if (layer.config.batch_shape) {
-                        layer.config.batch_input_shape = layer.config.batch_shape;
-                    }
+                if (layer.class_name === 'InputLayer' && layer.config && layer.config.batch_shape) {
+                    layer.config.batch_input_shape = layer.config.batch_shape;
                 }
-                
-                // 全レイヤーの config 内にあるオブジェクト型の dtype を単純な文字列 "float32" に修正
-                if (layer.config) {
-                    if (layer.config.dtype && typeof layer.config.dtype === 'object') {
-                        layer.config.dtype = 'float32'; // DTypePolicyオブジェクトを抹殺
-                    }
-                    // その他の不要なKeras 3用パラメータを削除
-                    delete layer.config.quantization_config;
+                if (layer.config && layer.config.dtype && typeof layer.config.dtype === 'object') {
+                    layer.config.dtype = 'float32';
                 }
+                if (layer.config) delete layer.config.quantization_config;
             });
-            
-            // モデル全体の型指定も文字列に修正
-            if (config.config && config.config.dtype && typeof config.config.dtype === 'object') {
-                config.config.dtype = 'float32';
+            if (modelJson.modelTopology.model_config.config && typeof modelJson.modelTopology.model_config.config.dtype === 'object') {
+                modelJson.modelTopology.model_config.config.dtype = 'float32';
             }
         }
 
-        // ③ クレンジング済みのJSON構造と、binファイルの配置パスを渡してモデルを復元
         const baseUrl = modelUrl.substring(0, modelUrl.lastIndexOf('/') + 1);
         aiModel = await tf.loadLayersModel({
-            load: async () => {
-                return {
-                    modelTopology: modelJson.modelTopology,
-                    weightsManifest: modelJson.weightsManifest
-                };
-            },
+            load: async () => ({ modelTopology: modelJson.modelTopology, weightsManifest: modelJson.weightsManifest }),
             path: baseUrl
         });
 
-        console.log("🎉 [TF.js] 互換性の壁を完全破壊！AIのロードに成功しました！");
+        logToScreen("🎉 AI脳みそのロードに完全成功しました！");
         isAIBrainLoading = false;
         return aiModel;
 
     } catch (error) {
-        console.error("❌ [エラー] 特殊ロードが失敗しました。自動バックアップを起動します:", error);
-        
-        // 🛡️ 【最終防衛ライン】もしJSONのクレンジングすら突破できない場合の自動バックアップ
+        logToScreen(`⚠️ 通常ロード失敗、擬似AI（Fallback）を起動します: ${error.message}`, true);
         try {
-            console.log("⚠️ [Fallback] フロントエンド側でニューラルネットワークを強制再構築します...");
             const fallbackModel = tf.sequential();
             fallbackModel.add(tf.layers.dense({units: 64, activation: 'relu', inputShape: [30]}));
             fallbackModel.add(tf.layers.dense({units: 32, activation: 'relu'}));
             fallbackModel.add(tf.layers.dense({units: 3, activation: 'linear'}));
-            
             fallbackModel.compile({optimizer: 'adam', loss: 'meanSquaredError'});
-            
             aiModel = fallbackModel;
-            console.log("🎯 [Fallback] 擬似AIの起動に成功しました（ゲームプレイ続行可能）。");
+            logToScreen("🎯 擬似AIの起動に成功。ゲームプレイは可能です。");
             isAIBrainLoading = false;
             return aiModel;
         } catch (innerError) {
-            console.error("🚨 致命的なエラー: 自動バックアップも失敗しました", innerError);
+            logToScreen(`🚨 致命的: 擬似AIの作成すら失敗: ${innerError.message}`, true);
             isAIBrainLoading = false;
         }
     }
 }
 
 /**
- * 📊 2. 現在のゲーム盤面データをAI用の30次元配列ベクトル（テンソル）に変換する関数
+ * 📊 2. 状態ベクトル変換
  */
 function convertStateToVector(currentData, cpuId) {
     const vector = new Array(30).fill(0.0);
     if (!currentData || !currentData.players) return vector;
 
-    // 自分の情報
     const myPlayer = currentData.players[cpuId] || {};
     const myHand = myPlayer.hand || [];
     for (let i = 0; i < Math.min(myHand.length, 10); i++) {
@@ -114,7 +115,6 @@ function convertStateToVector(currentData, cpuId) {
     }
     vector[10] = (myPlayer.score || 0) / 100.0;
 
-    // 相手の情報
     const enemyId = Object.keys(currentData.players).find(pid => pid !== cpuId);
     if (enemyId) {
         const enemyPlayer = currentData.players[enemyId];
@@ -124,31 +124,25 @@ function convertStateToVector(currentData, cpuId) {
         }
         vector[21] = (enemyPlayer.score || 0) / 100.0;
     }
-
-    // ターン数
     vector[22] = (currentData.turnCount || 1) / 10.0;
-
     return vector;
 }
 
 /**
- * 🤖 3. メインのAI（CPU）思考ロジック
+ * 🤖 3. CPU思考メインロジック
  */
 async function thinkCpuTurn(currentGameData, cpuId) {
-    if (!currentGameData || currentGameData.status !== 'playing') {
-        return currentGameData;
-    }
+    if (!currentGameData || currentGameData.status !== 'playing') return currentGameData;
 
-    // 脳みそ未ロードなら、思考処理の中で安全に非同期ロードする（フリーズ防止）
     if (!aiModel) {
+        logToScreen("🤖 AIが未ロードのため、急ぎでロードを試みます...");
         await loadAIBrain();
     }
 
-    console.log(`🤖 [AI思考開始] プレイヤー: ${cpuId} のターンを計算中...`);
+    logToScreen(`🤖 CPU(${cpuId}) が思考中...`);
     const stateVector = convertStateToVector(currentGameData, cpuId);
     let actionCategory = 0;
 
-    // ② TensorFlow.jsを使って予測
     if (aiModel) {
         try {
             const inputTensor = tf.tensor2d([stateVector], [1, 30]);
@@ -158,15 +152,14 @@ async function thinkCpuTurn(currentGameData, cpuId) {
             
             inputTensor.dispose();
             prediction.dispose();
-            
-            console.log(`🧠 [AI推論結果] カテゴリ: ${actionCategory}`);
+            logToScreen(`🧠 AI推論完了: カテゴリ [${actionCategory}] を選択。`);
         } catch (e) {
-            console.error("⚠️ 推論中にエラーが発生しました:", e);
+            logToScreen(`⚠️ 推論エラーのため通常行動を選択: ${e.message}`, true);
             actionCategory = 0;
         }
     }
 
-    // ③ AIが選んだカテゴリを元に手札の組み合わせを決定
+    // 手札処理
     const cpuPlayer = currentGameData.players[cpuId];
     let cpuHand = [...(cpuPlayer.hand || [])];
     const limit = currentGameData.config?.handLimitNum || 150;
@@ -174,39 +167,33 @@ async function thinkCpuTurn(currentGameData, cpuId) {
 
     let bestAction = { type: 'pass', score: -1, cardIdx: -1, card1Idx: -1, card2Idx: -1, resVal: -1 };
 
-    // 【攻撃作戦】
+    // 攻撃判定
     if (actionCategory === 1 && !isFirstRound) {
         cpuHand.forEach((attackNum, i) => {
             if (attackNum === 1) return;
             let totalGained = 0;
-            
             Object.keys(currentGameData.players).forEach(pid => {
                 if (pid === cpuId) return;
-                const enemyHand = currentGameData.players[pid].hand || [];
-                enemyHand.forEach(cardNum => {
+                (currentGameData.players[pid].hand || []).forEach(cardNum => {
                     if (cardNum % attackNum === 0) totalGained += cardNum;
                 });
             });
-
             if (totalGained > 0 && totalGained > bestAction.score) {
                 bestAction = { type: 'attack', score: totalGained, cardIdx: i, value: attackNum };
             }
         });
     }
 
-    // 【高度な特殊合成】
+    // 特殊合成判定
     if (bestAction.type === 'pass' && actionCategory === 2) {
         if (cpuHand.length >= 2) {
             for (let i = 0; i < cpuHand.length; i++) {
                 for (let j = 0; j < cpuHand.length; j++) {
                     if (i === j) continue;
                     let a = cpuHand[i], b = cpuHand[j];
-                    while (b !== 0) {
-                        let temp = b; b = a % b; a = temp;
-                    }
-                    const gcd = a;
-                    if (gcd > 1 && (cpuHand[i] * gcd) <= limit) {
-                        bestAction = { type: 'op2', card1Idx: i, card2Idx: j, resVal: cpuHand[i] * gcd };
+                    while (b !== 0) { let temp = b; b = a % b; a = temp; }
+                    if (a > 1 && (cpuHand[i] * a) <= limit) {
+                        bestAction = { type: 'op2', card1Idx: i, card2Idx: j, resVal: cpuHand[i] * a };
                         break;
                     }
                 }
@@ -215,7 +202,7 @@ async function thinkCpuTurn(currentGameData, cpuId) {
         }
     }
 
-    // 【通常合成セーフティネット】
+    // 通常合成判定
     if (bestAction.type === 'pass') {
         if (cpuHand.length >= 2) {
             for (let i = 0; i < cpuHand.length; i++) {
@@ -230,9 +217,10 @@ async function thinkCpuTurn(currentGameData, cpuId) {
         }
     }
 
-    // ④ 反映
+    // ゲームデータへの反映
     if (bestAction.type === 'attack') {
         const attackNum = bestAction.value;
+        logToScreen(`⚔️ CPUアクション: 攻撃 [倍数: ${attackNum}]`);
         Object.keys(currentGameData.players).forEach(pid => {
             if (pid === cpuId) return;
             currentGameData.players[pid].hand = currentGameData.players[pid].hand.filter(n => n % attackNum !== 0);
@@ -240,25 +228,23 @@ async function thinkCpuTurn(currentGameData, cpuId) {
         cpuHand.splice(bestAction.cardIdx, 1);
         currentGameData.players[cpuId].hand = cpuHand;
         currentGameData.players[cpuId].score = (currentGameData.players[cpuId].score || 0) + bestAction.score;
-
-        if (currentGameData.players[cpuId].score >= (currentGameData.config?.winScore || 100)) {
-            currentGameData.status = 'finished';
-        }
-    } 
-    else if (bestAction.type === 'op2') {
+        if (currentGameData.players[cpuId].score >= (currentGameData.config?.winScore || 100)) currentGameData.status = 'finished';
+    } else if (bestAction.type === 'op2') {
+        logToScreen(`➕ CPUアクション: 合成 [結果: ${bestAction.resVal}]`);
         const popIndices = [bestAction.card1Idx, bestAction.card2Idx].sort((a, b) => b - a);
         popIndices.forEach(idx => cpuHand.splice(idx, 1));
         cpuHand.push(bestAction.resVal);
         currentGameData.players[cpuId].hand = cpuHand;
+    } else {
+        logToScreen(`💤 CPUアクション: パス`);
     }
 
     return currentGameData;
 }
 
-// 🚀 ボタンや画面のフリーズを防ぐため、ページの全素材が読み込み終わった後に「ひっそりと」バックグラウンドでロードを開始する
+// 🚀 フリーズを絶対に防ぐため、読み込み完了後「5秒」待ってから非同期で静かにロードする
 window.addEventListener('load', () => {
-    // 1秒だけ猶予を持たせてメイン処理を優先させる
     setTimeout(() => {
-        loadAIBrain();
-    }, 1000);
+        loadAIBrain().catch(e => logToScreen("ロードキャッチ: " + e.message, true));
+    }, 5000);
 });
