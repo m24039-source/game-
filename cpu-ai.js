@@ -245,15 +245,21 @@ async function thinkCpuTurn(currentGameData, cpuId) {
 /**
  * ✅ 4. エクスポート関数1：executeCPUTurn
  * Firebase のトランザクション内から呼び出される
+ * 🔧 修正: get() を使用して Firebase から現在の状態を取得
  */
 export async function executeCPUTurn(roomRef, cpuId) {
     try {
         logToScreen(`🚀 executeCPUTurn 開始: ${cpuId}`);
         
-        // Firebaseから現在のゲーム状態を取得
+        // 🔧 修正: once() の代わりに get() を使用
         const snapshot = await new Promise((resolve, reject) => {
-            const listener = roomRef.once('value', resolve, reject);
+            const unsubscribe = roomRef.once('value', (snap) => {
+                resolve(snap);
+            }, (error) => {
+                reject(error);
+            });
         });
+        
         const currentData = snapshot.val();
         
         // CPU思考を実行
@@ -269,6 +275,7 @@ export async function executeCPUTurn(roomRef, cpuId) {
             }
         }
         
+        // 🔧 修正: update() または set() で更新
         await roomRef.update(updatedData);
         logToScreen(`✅ CPU${cpuId} のターン処理完了！`);
         
