@@ -242,6 +242,62 @@ async function thinkCpuTurn(currentGameData, cpuId) {
     return currentGameData;
 }
 
+/**
+ * ✅ 4. エクスポート関数1：executeCPUTurn
+ * Firebase のトランザクション内から呼び出される
+ */
+export async function executeCPUTurn(roomRef, cpuId) {
+    try {
+        logToScreen(`🚀 executeCPUTurn 開始: ${cpuId}`);
+        
+        // Firebaseから現在のゲーム状態を取得
+        const snapshot = await new Promise((resolve, reject) => {
+            const listener = roomRef.once('value', resolve, reject);
+        });
+        const currentData = snapshot.val();
+        
+        // CPU思考を実行
+        const updatedData = await thinkCpuTurn(currentData, cpuId);
+        
+        // ゲームデータをFirebaseに反映
+        if (updatedData.status === 'playing') {
+            // ターンを次に進める
+            updatedData.currentTurnIdx = (updatedData.currentTurnIdx + 1) % updatedData.turnOrder.length;
+            updatedData.absoluteTurnIdx++;
+            if (updatedData.currentTurnIdx === 0) {
+                updatedData.turnCount++;
+            }
+        }
+        
+        await roomRef.update(updatedData);
+        logToScreen(`✅ CPU${cpuId} のターン処理完了！`);
+        
+    } catch (error) {
+        logToScreen(`❌ executeCPUTurn でエラー: ${error.message}`, true);
+    }
+}
+
+/**
+ * ✅ 5. エクスポート関数2：loadBrain
+ * UI ボタンから呼び出される
+ */
+export async function loadBrain() {
+    try {
+        logToScreen("🧠 ユーザーが脳みそロードをリクエスト");
+        const result = await loadAIBrain();
+        if (result) {
+            logToScreen("✅ 脳みそロード完全成功！");
+            return true;
+        } else {
+            logToScreen("⚠️ 脳みそロード失敗", true);
+            return false;
+        }
+    } catch (error) {
+        logToScreen(`❌ loadBrain エラー: ${error.message}`, true);
+        return false;
+    }
+}
+
 // 🚀 フリーズを絶対に防ぐため、読み込み完了後「5秒」待ってから非同期で静かにロードする
 window.addEventListener('load', () => {
     setTimeout(() => {
