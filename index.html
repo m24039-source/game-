@@ -63,7 +63,8 @@
         import { getDatabase, ref, set, onValue, update, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
         
         // 🚨 後ろに ?v=2 をつけてキャッシュから強制的に引き剥がします
-        import { executeCPUTurn, loadBrain } from "./cpu-ai.js?v=2";
+        import { executeCPUTurn, loadBrain } from "./cpu-ai.js?v=4";
+        
         
         const firebaseConfig = { databaseURL: "https://math-tactics-default-rtdb.firebaseio.com/" };
         let db, roomRef, roomId = window.location.hash.substring(1);
