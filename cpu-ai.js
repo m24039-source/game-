@@ -4,7 +4,6 @@
 function logToScreen(message, isError = false) {
     let debugDiv = document.getElementById('ai-debug-log');
     if (!debugDiv) {
-        // 画面の最下部にログ表示用の黒いボックスを強制的に作ります
         debugDiv = document.createElement('div');
         debugDiv.id = 'ai-debug-log';
         debugDiv.style.position = 'fixed';
@@ -20,7 +19,7 @@ function logToScreen(message, isError = false) {
         debugDiv.style.padding = '10px';
         debugDiv.style.boxSizing = 'border-box';
         debugDiv.style.zIndex = '99999';
-        debugDiv.style.pointerEvents = 'none'; // ゲームの邪魔をしない
+        debugDiv.style.pointerEvents = 'none';
         document.body.appendChild(debugDiv);
     }
     const line = document.createElement('div');
@@ -30,18 +29,15 @@ function logToScreen(message, isError = false) {
     debugDiv.scrollTop = debugDiv.scrollHeight;
 }
 
-// 画面全体の致命的エラーを捕まえて画面に表示
 window.addEventListener('error', function(e) {
     logToScreen(`🚨 JSクラッシュ: ${e.message} (${e.filename}:${e.lineno})`, true);
 });
 
-// グローバル変数
 let aiModel = null;
 let isAIBrainLoading = false;
 
 /**
  * 🧠 1. AIの脳みそロード関数
- * ※ゲーム開始を邪魔しないよう、完全に裏方で処理させます。
  */
 async function loadAIBrain() {
     if (aiModel || isAIBrainLoading) return aiModel;
@@ -55,7 +51,6 @@ async function loadAIBrain() {
         if (!response.ok) throw new Error(`HTTPエラー! ステータス: ${response.status}`);
         const modelJson = await response.json();
 
-        // Keras 3形式のノイズをクレンジング
         if (modelJson && modelJson.modelTopology && modelJson.modelTopology.model_config) {
             const layers = modelJson.modelTopology.model_config.config.layers || [];
             layers.forEach(layer => {
@@ -159,7 +154,6 @@ async function thinkCpuTurn(currentGameData, cpuId) {
         }
     }
 
-    // 手札処理
     const cpuPlayer = currentGameData.players[cpuId];
     let cpuHand = [...(cpuPlayer.hand || [])];
     const limit = currentGameData.config?.handLimitNum || 150;
@@ -167,7 +161,6 @@ async function thinkCpuTurn(currentGameData, cpuId) {
 
     let bestAction = { type: 'pass', score: -1, cardIdx: -1, card1Idx: -1, card2Idx: -1, resVal: -1 };
 
-    // 攻撃判定
     if (actionCategory === 1 && !isFirstRound) {
         cpuHand.forEach((attackNum, i) => {
             if (attackNum === 1) return;
@@ -184,7 +177,6 @@ async function thinkCpuTurn(currentGameData, cpuId) {
         });
     }
 
-    // 特殊合成判定
     if (bestAction.type === 'pass' && actionCategory === 2) {
         if (cpuHand.length >= 2) {
             for (let i = 0; i < cpuHand.length; i++) {
@@ -202,7 +194,6 @@ async function thinkCpuTurn(currentGameData, cpuId) {
         }
     }
 
-    // 通常合成判定
     if (bestAction.type === 'pass') {
         if (cpuHand.length >= 2) {
             for (let i = 0; i < cpuHand.length; i++) {
@@ -217,7 +208,6 @@ async function thinkCpuTurn(currentGameData, cpuId) {
         }
     }
 
-    // ゲームデータへの反映
     if (bestAction.type === 'attack') {
         const attackNum = bestAction.value;
         logToScreen(`⚔️ CPUアクション: 攻撃 [倍数: ${attackNum}]`);
@@ -244,39 +234,29 @@ async function thinkCpuTurn(currentGameData, cpuId) {
 
 /**
  * ✅ 4. エクスポート関数1：executeCPUTurn
- * Firebase のトランザクション内から呼び出される
- * 🔧 修正: get() を使用して Firebase から現在の状態を取得
+ * 🔧 修正: runTransaction をシンプルに使用
  */
-export async function executeCPUTurn(roomRef, cpuId) {
+export async function executeCPUTurn(roomRef, cpuId, runTransaction) {
     try {
         logToScreen(`🚀 executeCPUTurn 開始: ${cpuId}`);
         
-        // 🔧 修正: once() の代わりに get() を使用
-        const snapshot = await new Promise((resolve, reject) => {
-            const unsubscribe = roomRef.once('value', (snap) => {
-                resolve(snap);
-            }, (error) => {
-                reject(error);
-            });
-        });
-        
-        const currentData = snapshot.val();
-        
-        // CPU思考を実行
-        const updatedData = await thinkCpuTurn(currentData, cpuId);
-        
-        // ゲームデータをFirebaseに反映
-        if (updatedData.status === 'playing') {
+        // runTransaction を使用してゲーム状態を更新
+        await runTransaction(roomRef, async (currentData) => {
+            if (!currentData || currentData.status !== 'playing') return currentData;
+            
+            // CPU思考を実行
+            const updatedData = await thinkCpuTurn(currentData, cpuId);
+            
             // ターンを次に進める
             updatedData.currentTurnIdx = (updatedData.currentTurnIdx + 1) % updatedData.turnOrder.length;
             updatedData.absoluteTurnIdx++;
             if (updatedData.currentTurnIdx === 0) {
                 updatedData.turnCount++;
             }
-        }
+            
+            return updatedData;
+        });
         
-        // 🔧 修正: update() または set() で更新
-        await roomRef.update(updatedData);
         logToScreen(`✅ CPU${cpuId} のターン処理完了！`);
         
     } catch (error) {
@@ -286,7 +266,6 @@ export async function executeCPUTurn(roomRef, cpuId) {
 
 /**
  * ✅ 5. エクスポート関数2：loadBrain
- * UI ボタンから呼び出される
  */
 export async function loadBrain() {
     try {
@@ -305,7 +284,6 @@ export async function loadBrain() {
     }
 }
 
-// 🚀 フリーズを絶対に防ぐため、読み込み完了後「5秒」待ってから非同期で静かにロードする
 window.addEventListener('load', () => {
     setTimeout(() => {
         loadAIBrain().catch(e => logToScreen("ロードキャッチ: " + e.message, true));
