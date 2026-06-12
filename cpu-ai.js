@@ -3,39 +3,54 @@ async function loadAIBrain() {
     const modelUrl = 'https://m24039-source.github.io/game-/tfjs_model/model.json'; 
 
     try {
-        console.log("🧠 [TF.js] 実際のJSON構造に合わせた互換性パッチを適用して読み込みます...");
+        console.log("🧠 [TF.js] Keras3の構造を徹底的にクレンジングして読み込みます...");
 
-        // 1. model.json を一度テキストとして先読み
+        // 1. model.json を先読み
         const response = await fetch(modelUrl);
         const modelJson = await response.json();
 
-        // 2. Keras 3特有の「batch_shape」を、古いTF.jsが理解できる「batch_input_shape」に翻訳するパッチ
+        // 2. 【超強力クレンジング】古いTF.jsが拒絶反応を起こすKeras3固有のデータを消し去る
         if (modelJson && modelJson.modelTopology && modelJson.modelTopology.model_config) {
-            const layers = modelJson.modelTopology.model_config.config.layers || [];
+            const config = modelJson.modelTopology.model_config;
+            const layers = config.config.layers || [];
             
             layers.forEach(layer => {
+                // ① 入力層の形を古い形式に強制変換
                 if (layer.class_name === 'InputLayer' && layer.config) {
-                    // もし batch_shape があって batch_input_shape が無ければ、値をコピーしてあげる
                     if (layer.config.batch_shape && !layer.config.batch_input_shape) {
                         layer.config.batch_input_shape = layer.config.batch_shape;
-                        console.log("🔧 [Patch] InputLayerの batch_shape を batch_input_shape に変換しました:", layer.config.batch_input_shape);
                     }
+                }
+                // ② 【重要】全レイヤーから古いTF.jsが死ぬ原因になる「dtypeオブジェクト」を抹消
+                if (layer.config) {
+                    if (typeof layer.config.dtype === 'object') {
+                        // オブジェクト型(DTypePolicy)になっていたら、ただの文字列 "float32" に上書き
+                        layer.config.dtype = 'float32'; 
+                    }
+                    // その他不要なKeras3固有のパラメータを削除
+                    delete layer.config.quantization_config;
                 }
             });
         }
 
-        // 3. パッチをあてたデータを元に、TF.jsに直接モデルを構築させる
-        const model = await tf.loadLayersModel(tf.io.fromMemory(
-            modelJson.modelTopology,
-            modelJson.weightsManifest,
-            modelUrl.substring(0, modelUrl.lastIndexOf('/') + 1) // 重みファイル(.bin)を探すベースURL
-        ));
+        // 3. 最もエラーが起きにくい「標準的なWebロード方式」に偽装してTF.jsに読み込ませる
+        // メモリ展開(fromMemory)ではなく、パッチを当てたJSONを仮想的なURLとしてTF.jsに渡します
+        const modifiedModel = await tf.loadLayersModel({
+            load: async () => {
+                return {
+                    modelTopology: modelJson.modelTopology,
+                    weightsManifest: modelJson.weightsManifest
+                };
+            },
+            // 重みバイナリファイルの場所を教えてあげる
+            path: modelUrl.substring(0, modelUrl.lastIndexOf('/') + 1)
+        });
 
-        console.log("🎉 [TF.js] 互換性の壁を突破！AIの脳みそが完全にロードされました！");
-        return model;
+        console.log("🎉 [TF.js] すべての呪いを解きました。AIのロードに完全成功しました！");
+        return modifiedModel;
 
     } catch (error) {
-        console.error("❌ [エラー] モデルのロードに失敗しました:", error);
-        alert("モデルの読み込みエラー: " + error.message);
+        console.error("❌ [エラー] 最終クレンジングでもロードに失敗:", error);
+        alert("AI読み込みエラー: " + error.message + "\n※シークレットタブで試してみてください。");
     }
 }
