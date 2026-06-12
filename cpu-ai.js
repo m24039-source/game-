@@ -233,21 +233,18 @@ async function thinkCpuTurn(currentGameData, cpuId) {
 }
 
 /**
- * ✅ 4. エクスポート関数1：executeCPUTurn
- * 🔧 修正: runTransaction をシンプルに使用
+ * ✅ グローバル関数：executeCPUTurn
+ * 🔧 修正: グローバル関数として定義
  */
-export async function executeCPUTurn(roomRef, cpuId, runTransaction) {
+async function executeCPUTurn(roomRef, cpuId, runTransaction) {
     try {
         logToScreen(`🚀 executeCPUTurn 開始: ${cpuId}`);
         
-        // runTransaction を使用してゲーム状態を更新
         await runTransaction(roomRef, async (currentData) => {
             if (!currentData || currentData.status !== 'playing') return currentData;
             
-            // CPU思考を実行
             const updatedData = await thinkCpuTurn(currentData, cpuId);
             
-            // ターンを次に進める
             updatedData.currentTurnIdx = (updatedData.currentTurnIdx + 1) % updatedData.turnOrder.length;
             updatedData.absoluteTurnIdx++;
             if (updatedData.currentTurnIdx === 0) {
@@ -265,9 +262,9 @@ export async function executeCPUTurn(roomRef, cpuId, runTransaction) {
 }
 
 /**
- * ✅ 5. エクスポート関数2：loadBrain
+ * ✅ グローバル関数：loadBrain
  */
-export async function loadBrain() {
+async function loadBrain() {
     try {
         logToScreen("🧠 ユーザーが脳みそロードをリクエスト");
         const result = await loadAIBrain();
