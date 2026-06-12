@@ -1,6 +1,6 @@
 // ==========================================
 // 数理変換タクティクス：CPU（AI）思考エンジン
-// 【H5変換・物理ファイル通信版】
+// 【URL自動認識・完全適合版】
 // ==========================================
 import { runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
@@ -8,7 +8,7 @@ let aiNeuralModel = null;
 let isModelLoading = false;
 
 /**
- * 📥 1. GitHub Pages上にある新形式の model.json をロード
+ * 📥 1. 自分のサイトの場所から自動で model.json をロード
  */
 export async function loadBrain() {
     if (aiNeuralModel) return true;
@@ -16,9 +16,17 @@ export async function loadBrain() {
     
     isModelLoading = true;
     try {
-        // タイムスタンプを付与してキャッシュを100%無視させます
-        const modelUrl = "https://m24039-source.github.io/game-/tfjs_model/model.json?t=" + Date.now();
-        console.log("📡 [AI] 新形式モデルのロードを開始:", modelUrl);
+        // 💡 自分の今のURL（ホスト名やリポジトリ名）を自動取得して、正しいパスを組み立てます
+        const currentOrigin = window.location.origin;
+        const currentPath = window.location.pathname;
+        
+        // 末尾の index.html などを削ってフォルダのパスだけにする処理
+        const folderPath = currentPath.substring(0, currentPath.lastIndexOf('/'));
+        
+        // ズレのない完璧な絶対URLを作成（キャッシュ破りのタイムスタンプ付き）
+        const modelUrl = `${currentOrigin}${folderPath}/tfjs_model/model.json?t=${Date.now()}`;
+        
+        console.log("📡 [AI] 自動認識されたURLからロードを開始:", modelUrl);
         
         aiNeuralModel = await tf.loadLayersModel(modelUrl);
 
