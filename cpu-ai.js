@@ -1,43 +1,39 @@
 // ==========================================
 // 数理変換タクティクス：CPU（AI）思考エンジン
-// 【GitHub Pages直接通信・完全勝訴版】
+// 【H5変換・物理ファイル通信版】
 // ==========================================
 import { runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-// AIの脳みそ（ニューラルネットワークモデル）を保持する変数
 let aiNeuralModel = null;
 let isModelLoading = false;
 
 /**
- * 📥 1. GitHub Pages上にある本物のmodel.jsonをURLから直接一本釣りする
+ * 📥 1. GitHub Pages上にある新形式の model.json をロード
  */
 export async function loadBrain() {
-    if (aiNeuralModel) return true; // すでにロード済みの場合はスキップ
+    if (aiNeuralModel) return true;
     if (isModelLoading) return false;
     
     isModelLoading = true;
     try {
-        // 💡 あなたのGitHub Pagesの絶対パスを直接叩いて、ファイルをロードさせます
-        // 末尾にダミーのタイムスタンプ(?t=...)を付けることで、ブラウザの頑固なキャッシュを強制破壊します
+        // タイムスタンプを付与してキャッシュを100%無視させます
         const modelUrl = "https://m24039-source.github.io/game-/tfjs_model/model.json?t=" + Date.now();
+        console.log("📡 [AI] 新形式モデルのロードを開始:", modelUrl);
         
-        console.log("📡 [AI] モデルの直接通信を開始します... URL:", modelUrl);
-        
-        // 正真正銘、本物のファイルを読み込み
         aiNeuralModel = await tf.loadLayersModel(modelUrl);
 
-        console.log("🏆 [AI] 脳みそファイルの読み込みとネットワークの構築に完全成功しました！");
+        console.log("🏆 [AI] 思考エンジンの初期化に完全成功しました！");
         isModelLoading = false;
         return true;
     } catch (error) {
-        console.error("⚠️ [AI] ファイルの読み込みに失敗しました。パスやGitHubの公開状態を確認してください:", error);
+        console.error("⚠️ [AI] モデルのロードに失敗しました:", error);
         isModelLoading = false;
         return false;
     }
 }
 
 /**
- * 📊 2. 盤面データをAIが理解できる数値の配列（30要素）に正規化
+ * 📊 2. 盤面データをAI用ベクトル（30要素）に変換
  */
 function convertStateToVector(currentData, cpuId) {
     const vector = new Array(30).fill(0);
@@ -62,7 +58,7 @@ function convertStateToVector(currentData, cpuId) {
 }
 
 /**
- * 🤖 3. CPU自動思考ロジック本体
+ * 🤖 3. CPU自動思考ロジック
  */
 export function executeCPUTurn(roomRef, cpuId) {
     if (!aiNeuralModel) {
@@ -105,7 +101,6 @@ export function executeCPUTurn(roomRef, cpuId) {
             predictedActionCategory = prediction.argMax(-1).dataSync()[0];
         });
 
-        // 最善手決定用変数
         let bestAction = { type: "pass", score: -1, cardIdx: -1, card1Idx: -1, card2Idx: -1, resVal: -1, opLabel: "" };
 
         // カテゴリ1：攻撃
@@ -124,7 +119,7 @@ export function executeCPUTurn(roomRef, cpuId) {
             }
         }
 
-        // カテゴリ2：高度な合成
+        // カテゴリ2：高度な合成（操作C）
         if (bestAction.type === "pass" && predictedActionCategory === 2) {
             if (cpuHand.length >= 2) {
                 for (let i = 0; i < cpuHand.length; i++) {
