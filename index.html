@@ -55,16 +55,14 @@
         .waiting-screen { text-align: center; padding: 30px; background: #f1f5f9; border-radius: 12px; margin-bottom: 15px; }
     </style>
     
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
-
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, set, onValue, update, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
         
-        // 🚨 後ろに ?v=2 をつけてキャッシュから強制的に引き剥がします
-        import { executeCPUTurn, loadBrain } from "./cpu-ai.js?v=4";
-        
+        // 💡 キャッシュを強制破壊するためにバージョンを ?v=5 に変更
+        import { executeCPUTurn, loadBrain } from "./cpu-ai.js?v=5";
         
         const firebaseConfig = { databaseURL: "https://math-tactics-default-rtdb.firebaseio.com/" };
         let db, roomRef, roomId = window.location.hash.substring(1);
@@ -100,8 +98,8 @@
             
             document.getElementById('btn-load-brain').onclick = async () => { 
                 const success = await loadBrain(); 
-                if(success) alert("📥 Colabで育てた脳みそをロードしました！AIの自動思考が有効化されます。");
-                else alert("⚠️ 脳みそファイルが見つからないか、読み込みに失敗しました。");
+                if(success) alert("📥 H5変換された脳みそをロードしました！AIの自動思考が正常に機能します。");
+                else alert("⚠️ 脳みそファイルの読み込みに失敗しました。GitHubの更新完了を待つかコンソールを確認してください。");
             };
         });
 
@@ -333,7 +331,7 @@
 
     <div class="ai-train-panel">
         <b style="color:#d97706;">🏋️‍♂️ 最強AI 逆輸入システム</b>
-        <p style="margin: 4px 0;">Colabで育てた脳みそ（フォルダ）を読み込んで対戦に反映します。</p>
+        <p style="margin: 4px 0;">Colab(H5形式経由)で育てた脳みそをURLから綺麗に読み込みます。</p>
         <button id="btn-load-brain" style="background:#f59e0b; color:white; padding:6px 12px; font-weight:bold; border-radius:6px; border:none; cursor:pointer; width: 100%;">📥 Colabから書き出した脳みそを読み込む</button>
     </div>
     
@@ -354,7 +352,7 @@
         <h3>👥 参加待機中...</h3>
         <p>現在: <span id="current-count">0</span> / <span id="target-count">0</span> 人</p>
         <div class="url-box"><span id="invite-url"></span></div>
-        <button id="btn-auto-join" style="background:#10b981; color:white; width:100%;" onclick="joinRoom()">この部屋に参戦する</button>
+        <button id="btn-auto-join" style="background:#10b981; width:100%;" onclick="joinRoom()">この部屋に参戦する</button>
     </div>
 
     <div id="game-screen" style="display: none;">
