@@ -1,6 +1,6 @@
 // ==========================================
 // 数理変換タクティクス：CPU（AI）思考エンジン
-// 【Firebase同期ループ完全分離・最終確定版】
+// 【TensorFlow.js仕様完全適合・最終修正版】
 // ==========================================
 import { runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
@@ -9,7 +9,7 @@ let aiNeuralModel = null;
 let isModelLoading = false; // 二重ロードを防ぐフラグ
 
 /**
- * 📥 1. 脳みその構造データをメモリ上に直接展開する（超高速・404回避）
+ * 📥 1. 脳みその構造データをメモリ上に直接展開する
  */
 export async function loadBrain() {
     if (aiNeuralModel) return true; // すでにロード済みの場合はスキップ
@@ -17,7 +17,7 @@ export async function loadBrain() {
     
     isModelLoading = true;
     try {
-        // あなたの正しいmodel.json構造を直接定義
+        // TensorFlow.jsが100%パースできる形式に微修正したモデル構造
         const modelJsonData = {
             "format": "layers-model", 
             "generatedBy": "keras v3.13.2", 
@@ -31,17 +31,26 @@ export async function loadBrain() {
                         "name": "sequential", 
                         "trainable": true, 
                         "layers": [
-                            {"class_name": "InputLayer", "config": {"batch_shape": [null, 30], "dtype": "float32", "sparse": false, "ragged": false, "name": "input_layer", "optional": false}}, 
+                            // 💡 修正のキモ：batch_shape を batchInputShape に変更し、確実にパースさせます
+                            {
+                                "class_name": "InputLayer", 
+                                "config": {
+                                    "batchInputShape": [null, 30], 
+                                    "dtype": "float32", 
+                                    "sparse": false, 
+                                    "ragged": false, 
+                                    "name": "input_layer"
+                                }
+                            }, 
                             {"class_name": "Dense", "config": {"name": "dense", "trainable": true, "units": 64, "activation": "relu", "use_bias": true}}, 
                             {"class_name": "Dense", "config": {"name": "dense_1", "trainable": true, "units": 32, "activation": "relu", "use_bias": true}}, 
                             {"class_name": "Dense", "config": {"name": "dense_2", "trainable": true, "units": 3, "activation": "linear", "use_bias": true}}
-                        ], 
-                        "build_input_shape": [null, 30]
+                        ]
                     }
                 }
             }, 
             "weightsManifest": [{
-                // バイナリファイルだけはGitHubの絶対パスから一本釣り
+                // 重みバイナリはGitHubから絶対パスで一本釣り
                 "paths": ["https://m24039-source.github.io/game-/tfjs_model/group1-shard1of1.bin"], 
                 "weights": [
                     {"name": "sequential/dense/kernel", "shape": [30, 64], "dtype": "float32"}, 
@@ -96,18 +105,15 @@ function convertStateToVector(currentData, cpuId) {
 }
 
 /**
- * 🤖 3. CPU自動思考ロジック本体（Firebase同期からロード処理を徹底隔離）
+ * 🤖 3. CPU自動思考ロジック本体
  */
 export function executeCPUTurn(roomRef, cpuId) {
-    // 🚨 修正のキモ：もし脳みそが未ロードなら、ここでは非同期ロードを「呼ばずに」単に即時ロード命令を裏で投げて終了する
-    // Firebaseのトランザクション内で await させないための絶対防御策です
     if (!aiNeuralModel) {
         loadBrain(); 
         console.log("💤 AIの脳みそが準備中のため、この手番は安全にスキップします。");
         return;
     }
 
-    // AIモデルが確実に存在する状態でのみ、安全に同期処理を開始
     runTransaction(roomRef, (currentData) => {
         if (!currentData || currentData.status !== 'playing') return currentData;
         
