@@ -286,3 +286,5 @@ window.addEventListener('load', () => {
         loadAIBrain().catch(e => logToScreen("ロードキャッチ: " + e.message, true));
     }, 5000);
 });
+
+export { executeCPUTurn, loadBrain };
