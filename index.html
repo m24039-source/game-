@@ -196,10 +196,28 @@
                 handLimitNum: parseInt(document.getElementById('cfg-hand-limit-num').value) || 150,
                 winScore: parseInt(document.getElementById('cfg-win-score').value) || 100,
                 maxTurns: parseInt(document.getElementById('cfg-max-turns').value) || 10,
-                totalTimeStock: 5, turnLimitTime: 30    
+                totalTimeStock: 5, turnLimitTime: 30
             };
             const initialData = { status: 'waiting', maxPlayers: maxPlayers, turnCount: 1, absoluteTurnIdx: 0, turnOrder: [], currentTurnIdx: 0, remainingTime: 30, timerMode: "stock", log: "部屋作成完了。\n", config: config, players: {} };
-            try { await set(roomRef, initialData); window.joinRoom(); } catch (err) { alert("部屋作成失敗: " + err.message); }
+            try {
+                await set(roomRef, initialData);
+                window.joinRoom(); // P1（プレイヤー）が参加
+                // AI対戦の場合、CPUを自動参加させる
+                await runTransaction(roomRef, (currentData) => {
+                    if (!currentData || currentData.status !== 'waiting') return currentData;
+                    if (!currentData.players) currentData.players = {};
+                    if (!currentData.turnOrder) currentData.turnOrder = [];
+                    const currentCount = Object.keys(currentData.players).length;
+                    if (currentCount >= currentData.maxPlayers) return currentData;
+                    const rule = currentData.config;
+                    let randomHand = [];
+                    for(let i = 0; i < rule.initHandCount; i++) randomHand.push(Math.floor(Math.random() * rule.initMaxNum) + 1);
+                    currentData.players["P2"] = { name: "CPU AI 🤖", score: 0, hand: randomHand, timeStock: 300 };
+                    currentData.turnOrder.push("P2");
+                    if (Object.keys(currentData.players).length >= currentData.maxPlayers) currentData.status = 'playing';
+                    return currentData;
+                });
+            } catch (err) { alert("部屋作成失敗: " + err.message); }
         };
 
         window.joinRoom = function() {
