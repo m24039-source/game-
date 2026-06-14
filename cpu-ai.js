@@ -283,59 +283,139 @@ async function executeCPUTurn(roomRef, cpuId, runTransaction, cachedGameState) {
             let cpuHand = [...(Array.isArray(cpuPlayer.hand) ? cpuPlayer.hand : Object.values(cpuPlayer.hand || {}))];
             const limit = currentData.config?.handLimitNum || 150;
             const isFirstRound = (currentData.turnCount === 1);
-            let bestAction = { type: 'pass', score: -1, cardIdx: -1, card1Idx: -1, card2Idx: -1, resVal: -1 };
 
-            if (actionCategory === 1 && !isFirstRound) {
-                cpuHand.forEach((attackNum, i) => {
-                    if (attackNum === 1) return;
-                    let totalGained = 0;
-                    Object.keys(currentData.players).forEach(pid => {
-                        if (pid === cpuId) return;
-                        (Array.isArray(currentData.players[pid].hand) ? currentData.players[pid].hand : Object.values(currentData.players[pid].hand || {})).forEach(n => {
-                            if (n % attackNum === 0) totalGained += n;
-                        });
-                    });
-                    if (totalGained > 0 && totalGained > bestAction.score) {
-                        bestAction = { type: 'attack', score: totalGained, cardIdx: i, value: attackNum };
-                    }
+            // ─── ヘルパー関数（同期） ───
+            const cpuGcd = (a, b) => { while(b){let t=b;b=a%b;a=t;} return a; };
+            const getEnemyHand = () => {
+                const eid = Object.keys(currentData.players).find(p => p !== cpuId);
+                return eid ? (Array.isArray(currentData.players[eid].hand) ? currentData.players[eid].hand : Object.values(currentData.players[eid].hand || {})) : [];
+            };
+
+            // ─── 各操作の最善候補を探す ───
+            let bestAttack = null, bestAttackGain = 0;
+            let bestAdd = null, bestAddVal = -1;
+            let bestSub = null, bestSubVal = 0;
+            let bestDp = null, bestDpVal = -1;
+            let bestDsd = null, bestDsdVal = -1;
+            let bestGm = null, bestGmVal = -1;
+
+            // 攻撃候補
+            if (!isFirstRound) {
+                const enemyH = getEnemyHand();
+                cpuHand.forEach((atk, i) => {
+                    if (atk === 1) return;
+                    const gain = enemyH.reduce((s, n) => n % atk === 0 ? s + n : s, 0);
+                    if (gain > bestAttackGain) { bestAttackGain = gain; bestAttack = { idx: i, value: atk, gain }; }
                 });
             }
 
-            if (bestAction.type === 'pass') {
-                if (cpuHand.length >= 2) {
-                    outer: for (let i = 0; i < cpuHand.length; i++) {
-                        for (let j = 0; j < cpuHand.length; j++) {
-                            if (i === j) continue;
-                            const addRes = cpuHand[i] + cpuHand[j];
-                            if (addRes <= limit) {
-                                bestAction = { type: 'op2', card1Idx: i, card2Idx: j, resVal: addRes };
-                                break outer;
-                            }
+            // 2枚操作候補
+            if (cpuHand.length >= 2) {
+                for (let i = 0; i < cpuHand.length; i++) {
+                    for (let j = 0; j < cpuHand.length; j++) {
+                        if (i === j) continue;
+                        const a = cpuHand[i], b = cpuHand[j];
+                        // 足し算
+                        const addR = a + b;
+                        if (addR <= limit && addR > bestAddVal) { bestAddVal = addR; bestAdd = {i, j, res: addR}; }
+                        // 引き算
+                        const subR = a - b;
+                        if (subR > 0 && subR > bestSubVal) { bestSubVal = subR; bestSub = {i, j, res: subR}; }
+                        // 商×余
+                        if (b !== 0) {
+                            const dpR = Math.floor(a/b) * (a%b);
+                            if (dpR > 0 && dpR <= limit && dpR > bestDpVal) { bestDpVal = dpR; bestDp = {i, j, res: dpR}; }
+                        }
+                        // GCD掛け算
+                        const g = cpuGcd(a, b);
+                        if (g > 1) {
+                            const gmR = a * g;
+                            if (gmR <= limit && gmR > bestGmVal) { bestGmVal = gmR; bestGm = {i, j, res: gmR}; }
                         }
                     }
                 }
             }
 
-            if (bestAction.type === 'attack') {
-                const attackNum = bestAction.value;
-                logToScreen(`⚔️ CPUアクション: 攻撃 [倍数: ${attackNum}]`);
-                Object.keys(currentData.players).forEach(pid => {
-                    if (pid === cpuId) return;
-                    const h = Array.isArray(currentData.players[pid].hand) ? currentData.players[pid].hand : Object.values(currentData.players[pid].hand || {});
-                    currentData.players[pid].hand = h.filter(n => n % attackNum !== 0);
-                });
-                cpuHand.splice(bestAction.cardIdx, 1);
-                currentData.players[cpuId].hand = cpuHand;
-                currentData.players[cpuId].score = (currentData.players[cpuId].score || 0) + bestAction.score;
-                if (currentData.players[cpuId].score >= (currentData.config?.winScore || 100)) currentData.status = 'finished';
-            } else if (bestAction.type === 'op2') {
-                logToScreen(`➕ CPUアクション: 合成 [結果: ${bestAction.resVal}]`);
-                [bestAction.card1Idx, bestAction.card2Idx].sort((a, b) => b - a).forEach(idx => cpuHand.splice(idx, 1));
-                cpuHand.push(bestAction.resVal);
-                currentData.players[cpuId].hand = cpuHand;
-            } else {
-                logToScreen(`💤 CPUアクション: パス`);
+            // 桁和で分裂候補
+            cpuHand.forEach((num, i) => {
+                const ds = String(num).split('').reduce((s,d) => s+parseInt(d), 0);
+                if (ds === 0) return;
+                const q = Math.floor(num / ds);
+                if (q <= limit && q > bestDsdVal) { bestDsdVal = q; bestDsd = {idx: i, num, q, r: num % ds}; }
+            });
+
+            // ─── AIカテゴリに従って行動選択（フォールバックあり） ───
+            let chosen = null;
+            const myScore = currentData.players[cpuId].score || 0;
+            const winScore = currentData.config?.winScore || 100;
+
+            // カテゴリ1=攻撃, 2=足し算, 3=引き算, 4=商×余, 5=桁和, 6=GCD
+            if (actionCategory === 1 && bestAttack) chosen = 'attack';
+            else if (actionCategory === 2 && bestAdd) chosen = 'add';
+            else if (actionCategory === 3 && bestSub) chosen = 'sub';
+            else if (actionCategory === 4 && bestDp)  chosen = 'dp';
+            else if (actionCategory === 5 && bestDsd) chosen = 'dsd';
+            else if (actionCategory === 6 && bestGm)  chosen = 'gm';
+
+            // フォールバック: AIが選んだ操作できないなら他の操作
+            if (!chosen) {
+                if (bestAttack && myScore + bestAttack.gain >= winScore) chosen = 'attack';
+                else if (bestGm && bestGmVal >= 30)  chosen = 'gm';
+                else if (bestAttack && bestAttackGain >= 10) chosen = 'attack';
+                else if (bestAdd && bestAddVal >= 20) chosen = 'add';
+                else if (bestDp  && bestDpVal  >= 15) chosen = 'dp';
+                else if (bestAttack) chosen = 'attack';
+                else if (bestGm)  chosen = 'gm';
+                else if (bestDsd) chosen = 'dsd';
+                else if (bestAdd) chosen = 'add';
+                else if (bestDp)  chosen = 'dp';
+                else if (bestSub) chosen = 'sub';
             }
+
+            // ─── 行動実行 ───
+            if (chosen === 'attack') {
+                const { idx, value, gain } = bestAttack;
+                logToScreen(`⚔️ CPU: 攻撃 [${value}] → ${gain}点獲得`);
+                const eid = Object.keys(currentData.players).find(p => p !== cpuId);
+                if (eid) {
+                    const eh = Array.isArray(currentData.players[eid].hand) ? currentData.players[eid].hand : Object.values(currentData.players[eid].hand || {});
+                    currentData.players[eid].hand = eh.filter(n => n % value !== 0);
+                }
+                cpuHand.splice(idx, 1);
+                currentData.players[cpuId].score = (currentData.players[cpuId].score || 0) + gain;
+                currentData.log = (currentData.log||'') + `⚔️ CPU が [${value}] で攻撃！ ${gain}点獲得\n`;
+                if (currentData.players[cpuId].score >= winScore) currentData.status = 'finished';
+            } else if (chosen === 'add') {
+                const {i,j,res} = bestAdd;
+                logToScreen(`➕ CPU: 足し算 [${cpuHand[i]}+${cpuHand[j]}=${res}]`);
+                cpuHand = cpuHand.filter((_,k)=>k!==i&&k!==j); cpuHand.push(res);
+                currentData.log = (currentData.log||'') + `➕ CPU: 足し算 → [${res}]\n`;
+            } else if (chosen === 'sub') {
+                const {i,j,res} = bestSub;
+                logToScreen(`➖ CPU: 引き算 [${cpuHand[i]}-${cpuHand[j]}=${res}]`);
+                cpuHand = cpuHand.filter((_,k)=>k!==i&&k!==j); cpuHand.push(res);
+                currentData.log = (currentData.log||'') + `➖ CPU: 引き算 → [${res}]\n`;
+            } else if (chosen === 'dp') {
+                const {i,j,res} = bestDp;
+                logToScreen(`🧩 CPU: 商×余 [${cpuHand[i]}÷${cpuHand[j]}=${res}]`);
+                cpuHand = cpuHand.filter((_,k)=>k!==i&&k!==j); cpuHand.push(res);
+                currentData.log = (currentData.log||'') + `🧩 CPU: 商×余 → [${res}]\n`;
+            } else if (chosen === 'dsd') {
+                const {idx,num,q,r} = bestDsd;
+                logToScreen(`🔢 CPU: 桁和分裂 [${num}→${q}${r>0?'+'+r:''}]`);
+                cpuHand.splice(idx, 1); cpuHand.push(q); if (r > 0) cpuHand.push(r);
+                currentData.log = (currentData.log||'') + `🔢 CPU: 桁和分裂 [${num}] → [${q}]${r>0?` と [${r}]`:''}\n`;
+            } else if (chosen === 'gm') {
+                const {i,j,res} = bestGm;
+                const g = cpuGcd(cpuHand[i], cpuHand[j]);
+                logToScreen(`🔮 CPU: GCD掛け [${cpuHand[i]}×GCD(${cpuHand[i]},${cpuHand[j]})=${res}]`);
+                cpuHand = cpuHand.filter((_,k)=>k!==i&&k!==j); cpuHand.push(res);
+                currentData.log = (currentData.log||'') + `🔮 CPU: GCD掛け → [${res}]\n`;
+            } else {
+                logToScreen(`💤 CPU: パス`);
+                currentData.log = (currentData.log||'') + `💤 CPU: パス\n`;
+            }
+            currentData.players[cpuId].hand = cpuHand;
 
             // ターン進行
             currentData.currentTurnIdx = (currentData.currentTurnIdx + 1) % currentData.turnOrder.length;
