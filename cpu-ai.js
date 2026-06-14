@@ -35,6 +35,7 @@ window.addEventListener('error', function(e) {
 
 let aiModel = null;
 let isAIBrainLoading = false;
+let cpuTurnInProgress = false;
 
 /**
  * 🧠 1. AIの脳みそロード関数
@@ -237,27 +238,41 @@ async function thinkCpuTurn(currentGameData, cpuId) {
  * 🔧 修正: グローバル関数として定義
  */
 async function executeCPUTurn(roomRef, cpuId, runTransaction) {
+    if (cpuTurnInProgress) {
+        logToScreen(`⏸️ スキップ: CPU既に思考中`);
+        return;
+    }
+    cpuTurnInProgress = true;
     try {
         logToScreen(`🚀 executeCPUTurn 開始: ${cpuId}`);
-        
+
         await runTransaction(roomRef, async (currentData) => {
             if (!currentData || currentData.status !== 'playing') return currentData;
-            
+
+            // 自分のターンかチェック
+            const activeId = currentData.turnOrder[currentData.currentTurnIdx];
+            if (activeId !== cpuId) {
+                logToScreen(`⏸️ ${cpuId}のターンではないためスキップ`);
+                return currentData;
+            }
+
             const updatedData = await thinkCpuTurn(currentData, cpuId);
-            
+
             updatedData.currentTurnIdx = (updatedData.currentTurnIdx + 1) % updatedData.turnOrder.length;
             updatedData.absoluteTurnIdx++;
             if (updatedData.currentTurnIdx === 0) {
                 updatedData.turnCount++;
             }
-            
+
             return updatedData;
         });
-        
+
         logToScreen(`✅ CPU${cpuId} のターン処理完了！`);
-        
+
     } catch (error) {
         logToScreen(`❌ executeCPUTurn でエラー: ${error.message}`, true);
+    } finally {
+        cpuTurnInProgress = false;
     }
 }
 
