@@ -157,9 +157,13 @@ function convertStateToInputs(currentData, cpuId) {
 
     const cfg = currentData.config || {};
     const ri = (cfg.resourceInitial != null && !isNaN(cfg.resourceInitial)) ? cfg.resourceInitial : null;
+    const rm = (cfg.resourceMin != null && !isNaN(cfg.resourceMin)) ? cfg.resourceMin : 0;
     const resRatio = (pid) => {
-        if (ri === null || ri <= 0) return 1.0;
-        return Math.min((currentData.players[pid]?.resource ?? ri) / ri, 2.0);
+        if (ri === null) return 1.0;
+        const range = ri - rm;
+        if (range <= 0) return 1.0;
+        const currentRes = currentData.players[pid]?.resource ?? ri;
+        return Math.min(Math.max((currentRes - rm) / range, 0), 2.0);
     };
     const scalars = [
         (myPlayer.score || 0) / 100.0,
@@ -346,7 +350,9 @@ async function executeCPUTurn(roomRef, cpuId, runTransaction, cachedGameState) {
             const cpuCanAfford = (handBefore, handAfter) => {
                 const cfg = currentData.config || {};
                 if (isNaN(cfg.resourceInitial) || cfg.resourceInitial === undefined) return true;
-                const diff = handAfter.reduce((s,n)=>s+n,0) - handBefore.reduce((s,n)=>s+n,0);
+                const rm = cfg.resourceMin ?? 0;
+                const effectiveBefore = Math.max(handBefore.reduce((s,n)=>s+n,0), rm);
+                const diff = handAfter.reduce((s,n)=>s+n,0) - effectiveBefore;
                 if (diff === 0) return true;
                 const base = Math.max(isNaN(cfg.resourceLogBase) ? 2 : cfg.resourceLogBase, 1.001);
                 const delta = (diff>0?1:-1) * Math.log(Math.abs(diff)+1) / Math.log(base);
@@ -355,7 +361,9 @@ async function executeCPUTurn(roomRef, cpuId, runTransaction, cachedGameState) {
             const cpuApplyResource = (handBefore, handAfter) => {
                 const cfg = currentData.config || {};
                 if (isNaN(cfg.resourceInitial) || cfg.resourceInitial === undefined) return;
-                const diff = handAfter.reduce((s,n)=>s+n,0) - handBefore.reduce((s,n)=>s+n,0);
+                const rm = cfg.resourceMin ?? 0;
+                const effectiveBefore = Math.max(handBefore.reduce((s,n)=>s+n,0), rm);
+                const diff = handAfter.reduce((s,n)=>s+n,0) - effectiveBefore;
                 if (diff === 0) return;
                 const base = Math.max(isNaN(cfg.resourceLogBase) ? 2 : cfg.resourceLogBase, 1.001);
                 const delta = (diff>0?1:-1) * Math.log(Math.abs(diff)+1) / Math.log(base);

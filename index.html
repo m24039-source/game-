@@ -65,7 +65,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, set, onValue, update, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
         
-        import { executeCPUTurn, loadBrain } from "./cpu-ai.js?v=17";
+        import { executeCPUTurn, loadBrain } from "./cpu-ai.js?v=18";
         
         const firebaseConfig = {
             apiKey: "AIzaSyALUFUpxPoYhRSUMMEkn5whaLnbkvKYvl4",
@@ -205,6 +205,7 @@
                 totalTimeStock: parseInt(document.getElementById('cfg-total-time-stock').value) || 5,
                 turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30,
                 resourceInitial: parseFloat(document.getElementById('cfg-resource-initial').value),
+                resourceMin: parseFloat(document.getElementById('cfg-resource-min').value) || 0,
                 resourceLogBase: parseFloat(document.getElementById('cfg-resource-log-base').value) || 2,
             };
             let p1Hand = [], p2Hand = [];
@@ -241,6 +242,7 @@
                 totalTimeStock: parseInt(document.getElementById('cfg-total-time-stock').value) || 5,
                 turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30,
                 resourceInitial: parseFloat(document.getElementById('cfg-resource-initial').value),
+                resourceMin: parseFloat(document.getElementById('cfg-resource-min').value) || 0,
                 resourceLogBase: parseFloat(document.getElementById('cfg-resource-log-base').value) || 2,
             };
             const initialData = {
@@ -353,7 +355,9 @@
             if (isNaN(cfg.resourceInitial) || cfg.resourceInitial === undefined) return true;
             const sumBefore = handBefore.reduce((s,n)=>s+n, 0);
             const sumAfter  = handAfter.reduce((s,n)=>s+n, 0);
-            const diff = sumAfter - sumBefore;
+            const rm = cfg.resourceMin ?? 0;
+            const effectiveBefore = Math.max(sumBefore, rm);
+            const diff = sumAfter - effectiveBefore;
             if (diff === 0) return true;
             const base = Math.max(isNaN(cfg.resourceLogBase) ? 2 : cfg.resourceLogBase, 1.001);
             const sign = diff > 0 ? 1 : -1;
@@ -532,6 +536,10 @@
             <div class="setting-item" style="background:#f5f3ff; border-radius:4px; padding:4px;">
                 <label style="color:#7c3aed; font-weight:bold;">🔋 初期リソース値</label>
                 <input type="number" id="cfg-resource-initial" value="10" step="0.5" min="0">
+            </div>
+            <div class="setting-item" style="background:#f5f3ff; border-radius:4px; padding:4px;">
+                <label style="color:#7c3aed; font-weight:bold;">🔻 リソース最低値（差分基準）</label>
+                <input type="number" id="cfg-resource-min" value="0" step="0.5" min="0">
             </div>
             <div class="setting-item" style="background:#f5f3ff; border-radius:4px; padding:4px;">
                 <label style="color:#7c3aed; font-weight:bold;">📊 リソース対数の底 a</label>
