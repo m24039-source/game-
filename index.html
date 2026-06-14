@@ -74,9 +74,9 @@
             appId: "1:933574342649:web:e4ad6d2df878d64dcbef28",
             measurementId: "G-DRXTV6RN8W"
         };
-        let db, roomRef, roomId = window.location.hash.substring(1);
-        const isNewRoom = !roomId;
-        if (!roomId) { roomId = "room_" + Math.random().toString(36).substring(2, 11); window.location.hash = roomId; }
+        // 古いハッシュを消して常に新しい部屋IDを生成
+        history.replaceState(null, '', window.location.pathname);
+        let db, roomRef, roomId = "room_" + Math.random().toString(36).substring(2, 11);
         
         const app = initializeApp(firebaseConfig);
         db = getDatabase(app);
@@ -216,7 +216,11 @@
                     P2: { name: "CPU AI 🤖", score: 0, hand: p2Hand, timeStock: 300 }
                 }
             };
-            try { await set(roomRef, initialData); } catch (err) { alert("部屋作成失敗: " + err.message); }
+            try {
+                await set(roomRef, initialData);
+                window.location.hash = roomId; // 部屋作成後にURLにハッシュをセット
+                document.getElementById('invite-url').innerText = window.location.href;
+            } catch (err) { alert("部屋作成失敗: " + err.message); }
         };
 
         window.joinRoom = function() {
