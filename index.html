@@ -75,6 +75,7 @@
             measurementId: "G-DRXTV6RN8W"
         };
         let db, roomRef, roomId = window.location.hash.substring(1);
+        const isNewRoom = !roomId;
         if (!roomId) { roomId = "room_" + Math.random().toString(36).substring(2, 11); window.location.hash = roomId; }
         
         const app = initializeApp(firebaseConfig);
@@ -102,14 +103,19 @@
         let currentProcessedTurnIdx = -1; 
         let timerInterval = null; 
 
-        window.addEventListener('DOMContentLoaded', () => { 
-            document.getElementById('invite-url').innerText = window.location.href; 
-            
-            document.getElementById('btn-load-brain').onclick = async () => { 
-                const success = await loadBrain(); 
+        window.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('invite-url').innerText = window.location.href;
+
+            document.getElementById('btn-load-brain').onclick = async () => {
+                const success = await loadBrain();
                 if(success) alert("📥 H5変換された脳みそをロードしました！AIの自動思考が正常に機能します。");
                 else alert("⚠️ 脳みそファイルの読み込みに失敗しました。GitHubの更新完了を待つかコンソールを確認してください。");
             };
+
+            // URLにハッシュがない場合は自動でAI対戦部屋を作成
+            if (isNewRoom) {
+                setTimeout(() => { window.createRoom(2); }, 500);
+            }
         });
 
         onValue(roomRef, (snapshot) => {
