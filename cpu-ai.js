@@ -84,7 +84,7 @@ async function loadAIBrain() {
             // フォールバック: Embedding+MaxPool構造のダミーモデル（7クラス）
             const myIn    = tf.input({shape: [MAX_HAND], dtype: 'int32', name: 'my_hand'});
             const enmIn   = tf.input({shape: [MAX_HAND], dtype: 'int32', name: 'enemy_hand'});
-            const scIn    = tf.input({shape: [5],        name: 'scalars'});
+            const scIn    = tf.input({shape: [8],        name: 'scalars'});
             const emb     = tf.layers.embedding({inputDim: 151, outputDim: 16, maskZero: true, name: 'card_emb'});
             const myPool  = tf.layers.globalMaxPooling1d({name: 'my_pool'}).apply(emb.apply(myIn));
             const enmPool = tf.layers.globalMaxPooling1d({name: 'enemy_pool'}).apply(emb.apply(enmIn));
@@ -126,12 +126,16 @@ function convertStateToInputs(currentData, cpuId) {
         return [...sliced, ...new Array(MAX_HAND - sliced.length).fill(0)];
     };
 
+    const cfg = currentData.config || {};
     const scalars = [
         (myPlayer.score || 0) / 100.0,
         (enemyId ? (currentData.players[enemyId].score || 0) : 0) / 100.0,
         (currentData.turnCount || 1) / 10.0,
-        myHand.length  / MAX_HAND,
+        myHand.length   / MAX_HAND,
         enemyHand.length / MAX_HAND,
+        (cfg.winScore       || 100) / 200.0,
+        (cfg.maxTurns       || 10)  / 20.0,
+        (cfg.initHandCount  || 5)   / 10.0,
     ];
 
     return { myPad: pad(myHand), enemyPad: pad(enemyHand), scalars };
@@ -271,7 +275,7 @@ async function executeCPUTurn(roomRef, cpuId, runTransaction, cachedGameState) {
                 if (inputs) {
                     const myTensor    = tf.tensor2d([inputs.myPad],    [1, MAX_HAND], 'int32');
                     const enemyTensor = tf.tensor2d([inputs.enemyPad], [1, MAX_HAND], 'int32');
-                    const scTensor    = tf.tensor2d([inputs.scalars],  [1, 5]);
+                    const scTensor    = tf.tensor2d([inputs.scalars],  [1, 8]);
                     const prediction  = aiModel.predict({
                         'my_hand':    myTensor,
                         'enemy_hand': enemyTensor,
