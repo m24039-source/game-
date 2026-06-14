@@ -48,7 +48,39 @@ async function loadAIBrain() {
     logToScreen("🧠 脳みそファイルのダウンロードを開始します...");
 
     try {
-        aiModel = await tf.loadLayersModel(modelUrl);
+        // model.json を取得
+        const resp = await fetch(modelUrl);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const modelJson = await resp.json();
+
+        // Keras 3 → TF.js 互換形式に変換
+        const mc = modelJson?.modelTopology?.model_config;
+        if (mc) {
+            if (mc.class_name === 'Functional') mc.class_name = 'Model';
+            (mc.config?.layers || []).forEach(layer => {
+                if (!layer.config) return;
+                if (layer.config.batch_shape)
+                    layer.config.batch_input_shape = layer.config.batch_shape;
+                if (layer.config.dtype && typeof layer.config.dtype === 'object')
+                    layer.config.dtype = layer.config.dtype?.config?.name ?? 'float32';
+                delete layer.config.quantization_config;
+                delete layer.config.optional;
+            });
+        }
+
+        // バイナリウェイトを取得して結合
+        const baseUrl = modelUrl.substring(0, modelUrl.lastIndexOf('/') + 1);
+        const weightSpecs = modelJson.weightsManifest.flatMap(m => m.weights);
+        const bufs = await Promise.all(
+            modelJson.weightsManifest[0].paths.map(p => fetch(baseUrl + p).then(r => r.arrayBuffer()))
+        );
+        const merged = new Uint8Array(bufs.reduce((s, b) => s + b.byteLength, 0));
+        let off = 0;
+        for (const b of bufs) { merged.set(new Uint8Array(b), off); off += b.byteLength; }
+
+        aiModel = await tf.loadLayersModel(
+            tf.io.fromMemory(modelJson.modelTopology, weightSpecs, merged.buffer)
+        );
         logToScreen("🎉 AI脳みそのロードに成功しました！");
         isAIBrainLoading = false;
         return aiModel;
