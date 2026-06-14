@@ -18,8 +18,10 @@
         .status-error { background: #ef4444; }
 
         .timer-panel { background: #fff1f2; border: 2px solid #fecdd3; padding: 12px; border-radius: 12px; text-align: center; margin-bottom: 15px; }
-        .timer-title { font-size: 12px; color: #991b1b; font-weight: bold; margin-bottom: 4px; }
-        .timer-count { font-size: 32px; font-weight: bold; color: var(--danger); font-family: monospace; }
+        .timer-title { font-size: 13px; color: #991b1b; font-weight: bold; margin-bottom: 4px; }
+        .timer-stock-row { font-size: 12px; color: #64748b; margin-bottom: 4px; }
+        .timer-byoyomi-label { font-size: 12px; font-weight: bold; color: #ef4444; letter-spacing: 3px; margin-bottom: 2px; display: none; }
+        .timer-count { font-size: 36px; font-weight: bold; font-family: monospace; color: var(--danger); transition: color 0.3s; }
 
         .setup-panel { background: #f1f5f9; padding: 15px; border-radius: 12px; margin-bottom: 15px; }
         .setting-group { display: flex; flex-direction: column; gap: 8px; text-align: left; margin-bottom: 15px; background: white; padding: 12px; border-radius: 8px; border: 1px solid var(--border); }
@@ -263,7 +265,22 @@
             const activePlayerId = gameState.turnOrder ? gameState.turnOrder[gameState.currentTurnIdx] : null;
             const isMyTurn = (activePlayerId === myPlayerId && gameState.status === 'playing');
             
-            document.getElementById('timer-box').innerText = gameState.timerMode === "stock" ? "持ち時間中" : `${gameState.remainingTime}秒`;
+            const activePlayer = gameState.players && gameState.players[activePlayerId];
+            const stockSec = activePlayer ? (activePlayer.timeStock || 0) : 0;
+            const stockStr = `${Math.floor(stockSec / 60)}:${String(stockSec % 60).padStart(2, '0')}`;
+            document.getElementById('timer-player-name').innerText = activePlayer ? `${activePlayer.name} のターン` : '⏳ タイマー';
+            document.getElementById('timer-stock-val').innerText = stockStr;
+            const timerBox = document.getElementById('timer-box');
+            const byoyomiLabel = document.getElementById('timer-byoyomi-label');
+            if (gameState.timerMode === "byoyomi") {
+                byoyomiLabel.style.display = 'block';
+                timerBox.innerText = gameState.remainingTime;
+                timerBox.style.color = gameState.remainingTime <= 10 ? '#ef4444' : '#f59e0b';
+            } else {
+                byoyomiLabel.style.display = 'none';
+                timerBox.innerText = stockStr;
+                timerBox.style.color = stockSec < 60 ? '#ef4444' : '#1e293b';
+            }
 
             if(gameState.turnOrder && gameState.players) {
                 gameState.turnOrder.forEach(pid => {
@@ -388,7 +405,12 @@
 
     <div id="game-screen" style="display: none;">
         <div id="rules-summary-box" class="rules-summary">ルール適用中</div>
-        <div class="timer-panel"><div id="timer-title" class="timer-title">⏳ タイマー</div><div id="timer-box" class="timer-count">--</div></div>
+        <div class="timer-panel">
+            <div id="timer-player-name" class="timer-title">⏳ タイマー</div>
+            <div class="timer-stock-row">⏱ 持ち時間: <span id="timer-stock-val">--</span></div>
+            <div id="timer-byoyomi-label" class="timer-byoyomi-label">🔔 秒 読 み</div>
+            <div id="timer-box" class="timer-count">--</div>
+        </div>
         <div class="section-title">全プレイヤーの状況</div><div class="pvp-board" id="pvp-board"></div>
         <div id="turn-info" style="text-align: center; font-weight: bold; margin-bottom: 15px;"></div>
         <div class="section-title">あなたの手札</div><div class="hand-container" id="hand-area"></div>
