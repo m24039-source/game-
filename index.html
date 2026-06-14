@@ -204,26 +204,22 @@
                 maxTurns: parseInt(document.getElementById('cfg-max-turns').value) || 10,
                 totalTimeStock: 5, turnLimitTime: 30
             };
-            const initialData = { status: 'waiting', maxPlayers: maxPlayers, turnCount: 1, absoluteTurnIdx: 0, turnOrder: [], currentTurnIdx: 0, remainingTime: 30, timerMode: "stock", log: "部屋作成完了。\n", config: config, players: {} };
-            try {
-                await set(roomRef, initialData);
-                window.joinRoom(); // P1（プレイヤー）が参加
-                // AI対戦の場合、CPUを自動参加させる
-                await runTransaction(roomRef, (currentData) => {
-                    if (!currentData || currentData.status !== 'waiting') return currentData;
-                    if (!currentData.players) currentData.players = {};
-                    if (!currentData.turnOrder) currentData.turnOrder = [];
-                    const currentCount = Object.keys(currentData.players).length;
-                    if (currentCount >= currentData.maxPlayers) return currentData;
-                    const rule = currentData.config;
-                    let randomHand = [];
-                    for(let i = 0; i < rule.initHandCount; i++) randomHand.push(Math.floor(Math.random() * rule.initMaxNum) + 1);
-                    currentData.players["P2"] = { name: "CPU AI 🤖", score: 0, hand: randomHand, timeStock: 300 };
-                    currentData.turnOrder.push("P2");
-                    if (Object.keys(currentData.players).length >= currentData.maxPlayers) currentData.status = 'playing';
-                    return currentData;
-                });
-            } catch (err) { alert("部屋作成失敗: " + err.message); }
+            let p1Hand = [], p2Hand = [];
+            for(let i = 0; i < config.initHandCount; i++) {
+                p1Hand.push(Math.floor(Math.random() * config.initMaxNum) + 1);
+                p2Hand.push(Math.floor(Math.random() * config.initMaxNum) + 1);
+            }
+            myPlayerId = 'P1';
+            const initialData = {
+                status: 'playing', maxPlayers: maxPlayers, turnCount: 1, absoluteTurnIdx: 0,
+                turnOrder: ['P1', 'P2'], currentTurnIdx: 0, remainingTime: 30, timerMode: "stock",
+                log: "部屋作成完了。ゲームスタート！\n", config: config,
+                players: {
+                    P1: { name: "プレイヤー 1", score: 0, hand: p1Hand, timeStock: 300 },
+                    P2: { name: "CPU AI 🤖", score: 0, hand: p2Hand, timeStock: 300 }
+                }
+            };
+            try { await set(roomRef, initialData); } catch (err) { alert("部屋作成失敗: " + err.message); }
         };
 
         window.joinRoom = function() {
