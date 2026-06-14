@@ -48,38 +48,13 @@ async function loadAIBrain() {
     logToScreen("🧠 脳みそファイルのダウンロードを開始します...");
 
     try {
-        const response = await fetch(modelUrl);
-        if (!response.ok) throw new Error(`HTTPエラー! ステータス: ${response.status}`);
-        const modelJson = await response.json();
-
-        if (modelJson && modelJson.modelTopology && modelJson.modelTopology.model_config) {
-            const layers = modelJson.modelTopology.model_config.config.layers || [];
-            layers.forEach(layer => {
-                if (layer.class_name === 'InputLayer' && layer.config && layer.config.batch_shape) {
-                    layer.config.batch_input_shape = layer.config.batch_shape;
-                }
-                if (layer.config && layer.config.dtype && typeof layer.config.dtype === 'object') {
-                    layer.config.dtype = 'float32';
-                }
-                if (layer.config) delete layer.config.quantization_config;
-            });
-            if (modelJson.modelTopology.model_config.config && typeof modelJson.modelTopology.model_config.config.dtype === 'object') {
-                modelJson.modelTopology.model_config.config.dtype = 'float32';
-            }
-        }
-
-        const baseUrl = modelUrl.substring(0, modelUrl.lastIndexOf('/') + 1);
-        aiModel = await tf.loadLayersModel({
-            load: async () => ({ modelTopology: modelJson.modelTopology, weightsManifest: modelJson.weightsManifest }),
-            path: baseUrl
-        });
-
-        logToScreen("🎉 AI脳みそのロードに完全成功しました！");
+        aiModel = await tf.loadLayersModel(modelUrl);
+        logToScreen("🎉 AI脳みそのロードに成功しました！");
         isAIBrainLoading = false;
         return aiModel;
 
     } catch (error) {
-        logToScreen(`⚠️ 通常ロード失敗、擬似AI（Fallback）を起動します: ${error.message}`, true);
+        logToScreen(`⚠️ ロード失敗、擬似AI（Fallback）を起動します: ${error.message}`, true);
         try {
             // フォールバック: Embedding+MaxPool構造のダミーモデル（7クラス）
             const myIn    = tf.input({shape: [MAX_HAND], dtype: 'int32', name: 'my_hand'});
@@ -283,11 +258,7 @@ async function executeCPUTurn(roomRef, cpuId, runTransaction, cachedGameState) {
                     const myTensor    = tf.tensor2d([inputs.myPad],    [1, MAX_HAND], 'int32');
                     const enemyTensor = tf.tensor2d([inputs.enemyPad], [1, MAX_HAND], 'int32');
                     const scTensor    = tf.tensor2d([inputs.scalars],  [1, 10]);
-                    const prediction  = aiModel.predict({
-                        'my_hand':    myTensor,
-                        'enemy_hand': enemyTensor,
-                        'scalars':    scTensor,
-                    });
+                    const prediction  = aiModel.predict([myTensor, enemyTensor, scTensor]);
                     const predictionData = await prediction.data();
                     actionCategory = predictionData.indexOf(Math.max(...predictionData));
                     myTensor.dispose(); enemyTensor.dispose(); scTensor.dispose(); prediction.dispose();
