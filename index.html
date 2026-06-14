@@ -77,9 +77,10 @@
             appId: "1:933574342649:web:e4ad6d2df878d64dcbef28",
             measurementId: "G-DRXTV6RN8W"
         };
-        // 古いハッシュを消して常に新しい部屋IDを生成
-        history.replaceState(null, '', window.location.pathname);
-        let db, roomRef, roomId = "room_" + Math.random().toString(36).substring(2, 11);
+        // 既存ハッシュがあれば使用（招待URL対応）、なければ新規生成
+        const existingHash = window.location.hash.substring(1);
+        let db, roomRef, roomId = existingHash || "room_" + Math.random().toString(36).substring(2, 11);
+        if (!existingHash) history.replaceState(null, '', window.location.pathname);
         
         const app = initializeApp(firebaseConfig);
         db = getDatabase(app);
@@ -145,8 +146,7 @@
                     if (myPlayerId === 'P1') startHostTimer();
 
                     const activePlayerId = gameState.turnOrder ? gameState.turnOrder[gameState.currentTurnIdx] : null;
-                    if (activePlayerId && activePlayerId !== myPlayerId && myPlayerId === 'P1') {
-                        // 🔧 修正: runTransaction をパラメータとして渡す
+                    if (activePlayerId && activePlayerId !== myPlayerId && myPlayerId === 'P1' && gameState.isAIGame) {
                         const snapState = JSON.parse(JSON.stringify(gameState));
                         setTimeout(() => { executeCPUTurn(roomRef, activePlayerId, runTransaction, snapState); }, 1000);
                     }
@@ -213,8 +213,8 @@
             myPlayerId = 'P1';
             const initialData = {
                 status: 'playing', maxPlayers: maxPlayers, turnCount: 1, absoluteTurnIdx: 0,
-                turnOrder: ['P1', 'P2'], currentTurnIdx: 0, remainingTime: 30, timerMode: "stock",
-                log: "部屋作成完了。ゲームスタート！\n", config: config,
+                turnOrder: ['P1', 'P2'], currentTurnIdx: 0, remainingTime: config.turnLimitTime, timerMode: "stock",
+                log: "部屋作成完了。ゲームスタート！\n", config: config, isAIGame: true,
                 players: {
                     P1: { name: "プレイヤー 1", score: 0, hand: p1Hand, timeStock: config.totalTimeStock * 60 },
                     P2: { name: "CPU AI 🤖", score: 0, hand: p2Hand, timeStock: config.totalTimeStock * 60 }
@@ -222,8 +222,34 @@
             };
             try {
                 await set(roomRef, initialData);
-                window.location.hash = roomId; // 部屋作成後にURLにハッシュをセット
+                window.location.hash = roomId;
                 document.getElementById('invite-url').innerText = window.location.href;
+            } catch (err) { alert("部屋作成失敗: " + err.message); }
+        };
+
+        window.createOnlineRoom = async function() {
+            const config = {
+                initHandCount: parseInt(document.getElementById('cfg-init-hand-count').value) || 5,
+                initMaxNum: parseInt(document.getElementById('cfg-init-max-num').value) || 10,
+                drawCount: parseInt(document.getElementById('cfg-draw-count').value) || 2,
+                drawMaxNum: parseInt(document.getElementById('cfg-draw-max-num').value) || 20,
+                handLimitNum: parseInt(document.getElementById('cfg-hand-limit-num').value) || 150,
+                winScore: parseInt(document.getElementById('cfg-win-score').value) || 100,
+                maxTurns: parseInt(document.getElementById('cfg-max-turns').value) || 10,
+                totalTimeStock: parseInt(document.getElementById('cfg-total-time-stock').value) || 5,
+                turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30
+            };
+            const initialData = {
+                status: 'waiting', maxPlayers: 2, turnCount: 1, absoluteTurnIdx: 0,
+                turnOrder: [], currentTurnIdx: 0, remainingTime: config.turnLimitTime, timerMode: "stock",
+                log: "オンライン対戦部屋を作成しました。友達を招待してください。\n", config: config, isAIGame: false,
+                players: {}
+            };
+            try {
+                await set(roomRef, initialData);
+                window.location.hash = roomId;
+                document.getElementById('invite-url').innerText = window.location.href;
+                window.joinRoom();
             } catch (err) { alert("部屋作成失敗: " + err.message); }
         };
 
@@ -241,7 +267,7 @@
                 let randomHand = [];
                 for(let i = 0; i < rule.initHandCount; i++) randomHand.push(Math.floor(Math.random() * rule.initMaxNum) + 1);
                 
-                currentData.players[newId] = { name: `プレイヤー ${currentCount + 1}`, score: 0, hand: randomHand, timeStock: 300 };
+                currentData.players[newId] = { name: `プレイヤー ${currentCount + 1}`, score: 0, hand: randomHand, timeStock: (rule.totalTimeStock || 5) * 60 };
                 currentData.turnOrder.push(newId);
                 
                 if (Object.keys(currentData.players).length == currentData.maxPlayers) currentData.status = 'playing';
@@ -326,8 +352,9 @@
                 });
                 myHand.splice(selectedIndices[0], 1); currentData.players[myPlayerId].hand = myHand;
                 currentData.players[myPlayerId].score += gained;
+                currentData.log = (currentData.log||'') + `⚔️ ${currentData.players[myPlayerId].name} が [${attackNum}] で攻撃！ ${gained}点獲得\n`;
                 if(currentData.players[myPlayerId].score >= currentData.config.winScore) currentData.status = 'finished';
-                advanceTurn(currentData); return currentData;
+                return currentData; // advanceTurnしない
             }).then(() => { selectedIndices = []; updateDOM(); });
         };
 
@@ -365,7 +392,7 @@
                 h = h.filter((_,i) => i!==selectedIndices[0] && i!==selectedIndices[1]);
                 h.push(res); currentData.players[myPlayerId].hand = h;
                 currentData.log = (currentData.log||'') + `🔮 ${currentData.players[myPlayerId].name}: ${n1} と ${n2} → [${res}] (${label})\n`;
-                advanceTurn(currentData); return currentData;
+                return currentData; // advanceTurnしない
             }).then(() => { selectedIndices = []; updateDOM(); });
         }
 
@@ -395,7 +422,7 @@
                 if(r > 0) h.push(r);
                 currentData.players[myPlayerId].hand = h;
                 currentData.log = (currentData.log||'') + `🔢 ${currentData.players[myPlayerId].name}: [${num}] → [${q}]${r>0?` と [${r}]`:''}  (桁和分裂)\n`;
-                advanceTurn(currentData); return currentData;
+                return currentData; // advanceTurnしない
             }).then(() => { selectedIndices = []; updateDOM(); });
         };
 
@@ -416,7 +443,7 @@
                 const i2 = h.indexOf(Y); if(i2!==-1) h.splice(i2,1);
                 h.push(res); currentData.players[myPlayerId].hand = h;
                 currentData.log = (currentData.log||'') + `🔮 ${currentData.players[myPlayerId].name}: [${X}]×[${Y}]のGCD(${gcd})→ [${res}] (GCD掛け算)\n`;
-                advanceTurn(currentData); return currentData;
+                return currentData; // advanceTurnしない
             }).then(() => { selectedIndices = []; updateDOM(); });
         };
 
@@ -456,7 +483,10 @@
                 <input type="number" id="cfg-turn-limit-time" value="30" min="5" max="300">
             </div>
         </div>
-        <button style="background:#2563eb; color:white; padding:10px;" onclick="createRoom(2)">2人部屋(AI対戦)を開始</button>
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:8px;">
+            <button style="background:#2563eb; color:white; padding:10px 18px; border-radius:8px; font-size:1rem;" onclick="createRoom(2)">🤖 AI対戦を開始</button>
+            <button style="background:#16a34a; color:white; padding:10px 18px; border-radius:8px; font-size:1rem;" onclick="createOnlineRoom()">🌐 オンライン対戦部屋を作成</button>
+        </div>
     </div>
 
     <div id="waiting-screen" class="waiting-screen" style="display:none;">
