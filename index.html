@@ -64,7 +64,16 @@
         
         import { executeCPUTurn, loadBrain } from "./cpu-ai.js?v=7";
         
-        const firebaseConfig = { databaseURL: "https://math-tactics-default-rtdb.firebaseio.com/" };
+        const firebaseConfig = {
+            apiKey: "AIzaSyALUFUpxPoYhRSUMMEkn5whaLnbkvKYvl4",
+            authDomain: "math-tactics.firebaseapp.com",
+            databaseURL: "https://math-tactics-default-rtdb.firebaseio.com",
+            projectId: "math-tactics",
+            storageBucket: "math-tactics.firebasestorage.app",
+            messagingSenderId: "933574342649",
+            appId: "1:933574342649:web:e4ad6d2df878d64dcbef28",
+            measurementId: "G-DRXTV6RN8W"
+        };
         let db, roomRef, roomId = window.location.hash.substring(1);
         if (!roomId) { roomId = "room_" + Math.random().toString(36).substring(2, 11); window.location.hash = roomId; }
         
