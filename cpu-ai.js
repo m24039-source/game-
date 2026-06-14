@@ -57,7 +57,11 @@ async function loadAIBrain() {
         const mc = modelJson?.modelTopology?.model_config;
         if (mc) {
             if (mc.class_name === 'Functional') mc.class_name = 'Model';
-            (mc.config?.layers || []).forEach(layer => {
+            const cfg = mc.config || {};
+            // output_layers が [name,0,0] の場合 [[name,0,0]] に変換
+            if (Array.isArray(cfg.output_layers) && !Array.isArray(cfg.output_layers[0]))
+                cfg.output_layers = [cfg.output_layers];
+            (cfg.layers || []).forEach(layer => {
                 if (!layer.config) return;
                 if (layer.config.batch_shape)
                     layer.config.batch_input_shape = layer.config.batch_shape;
@@ -65,6 +69,24 @@ async function loadAIBrain() {
                     layer.config.dtype = layer.config.dtype?.config?.name ?? 'float32';
                 delete layer.config.quantization_config;
                 delete layer.config.optional;
+                // inbound_nodes: Keras3 オブジェクト形式 → Keras2 配列形式
+                if (Array.isArray(layer.inbound_nodes)) {
+                    layer.inbound_nodes = layer.inbound_nodes.map(node => {
+                        if (Array.isArray(node)) return node;
+                        const firstArg = (node.args || [])[0];
+                        if (Array.isArray(firstArg)) {
+                            // Concatenate 等: args[0] がテンソルリスト
+                            return firstArg.map(t => {
+                                const [n, ni, ti] = t?.config?.keras_history || [null,0,0];
+                                return [n, ni??0, ti??0, {}];
+                            });
+                        } else if (firstArg?.class_name === '__keras_tensor__') {
+                            const [n, ni, ti] = firstArg.config.keras_history;
+                            return [[n, ni??0, ti??0, {}]];
+                        }
+                        return [];
+                    });
+                }
             });
         }
 
