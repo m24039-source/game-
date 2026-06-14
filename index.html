@@ -112,10 +112,6 @@
                 else alert("⚠️ 脳みそファイルの読み込みに失敗しました。GitHubの更新完了を待つかコンソールを確認してください。");
             };
 
-            // URLにハッシュがない場合は自動でAI対戦部屋を作成
-            if (isNewRoom) {
-                setTimeout(() => { window.createRoom(2); }, 500);
-            }
         });
 
         onValue(roomRef, (snapshot) => {
