@@ -310,6 +310,25 @@ async function executeCPUTurn(roomRef, cpuId, runTransaction, cachedGameState) {
 
             // ─── ヘルパー関数（同期） ───
             const cpuGcd = (a, b) => { while(b){let t=b;b=a%b;a=t;} return a; };
+            const cpuResource = () => currentData.players[cpuId].resource ?? (currentData.config?.resourceInitial ?? Infinity);
+            const cpuCanAfford = (handBefore, handAfter) => {
+                const cfg = currentData.config || {};
+                if (isNaN(cfg.resourceInitial) || cfg.resourceInitial === undefined) return true;
+                const diff = handAfter.reduce((s,n)=>s+n,0) - handBefore.reduce((s,n)=>s+n,0);
+                if (diff === 0) return true;
+                const base = Math.max(isNaN(cfg.resourceLogBase) ? 2 : cfg.resourceLogBase, 1.001);
+                const delta = (diff>0?1:-1) * Math.log(Math.abs(diff)+1) / Math.log(base);
+                return cpuResource() + delta >= 0;
+            };
+            const cpuApplyResource = (handBefore, handAfter) => {
+                const cfg = currentData.config || {};
+                if (isNaN(cfg.resourceInitial) || cfg.resourceInitial === undefined) return;
+                const diff = handAfter.reduce((s,n)=>s+n,0) - handBefore.reduce((s,n)=>s+n,0);
+                if (diff === 0) return;
+                const base = Math.max(isNaN(cfg.resourceLogBase) ? 2 : cfg.resourceLogBase, 1.001);
+                const delta = (diff>0?1:-1) * Math.log(Math.abs(diff)+1) / Math.log(base);
+                currentData.players[cpuId].resource = cpuResource() + delta;
+            };
             const getEnemyHand = () => {
                 const eid = Object.keys(currentData.players).find(p => p !== cpuId);
                 return eid ? (Array.isArray(currentData.players[eid].hand) ? currentData.players[eid].hand : Object.values(currentData.players[eid].hand || {})) : [];
@@ -396,46 +415,78 @@ async function executeCPUTurn(roomRef, cpuId, runTransaction, cachedGameState) {
                 else if (bestSub) chosen = 'sub';
             }
 
-            // ─── 行動実行 ───
+            // ─── 行動実行（リソースチェックあり） ───
+            const tryExec = (actionName, handFn) => {
+                const before = [...cpuHand];
+                const after = handFn([...cpuHand]);
+                if (!cpuCanAfford(before, after)) {
+                    logToScreen(`⚠️ CPU: リソース不足で${actionName}をスキップ`);
+                    return false;
+                }
+                cpuApplyResource(before, after);
+                cpuHand = after;
+                return true;
+            };
+
             if (chosen === 'attack') {
                 const { idx, value, gain } = bestAttack;
-                logToScreen(`⚔️ CPU: 攻撃 [${value}] → ${gain}点獲得`);
-                const eid = Object.keys(currentData.players).find(p => p !== cpuId);
-                if (eid) {
-                    const eh = Array.isArray(currentData.players[eid].hand) ? currentData.players[eid].hand : Object.values(currentData.players[eid].hand || {});
-                    currentData.players[eid].hand = eh.filter(n => n % value !== 0);
+                const before = [...cpuHand];
+                const after = cpuHand.filter((_,k) => k !== idx);
+                if (!cpuCanAfford(before, after)) {
+                    logToScreen(`⚠️ CPU: リソース不足で攻撃スキップ`);
+                    chosen = null; // フォールバックへ
+                } else {
+                    cpuApplyResource(before, after);
+                    cpuHand = after;
+                    const eid = Object.keys(currentData.players).find(p => p !== cpuId);
+                    if (eid) {
+                        const eh = Array.isArray(currentData.players[eid].hand) ? currentData.players[eid].hand : Object.values(currentData.players[eid].hand || {});
+                        currentData.players[eid].hand = eh.filter(n => n % value !== 0);
+                    }
+                    currentData.players[cpuId].score = (currentData.players[cpuId].score || 0) + gain;
+                    currentData.log = (currentData.log||'') + `⚔️ CPU が [${value}] で攻撃！ ${gain}点獲得\n`;
+                    logToScreen(`⚔️ CPU: 攻撃 [${value}] → ${gain}点獲得`);
+                    if (currentData.players[cpuId].score >= winScore) currentData.status = 'finished';
                 }
-                cpuHand.splice(idx, 1);
-                currentData.players[cpuId].score = (currentData.players[cpuId].score || 0) + gain;
-                currentData.log = (currentData.log||'') + `⚔️ CPU が [${value}] で攻撃！ ${gain}点獲得\n`;
-                if (currentData.players[cpuId].score >= winScore) currentData.status = 'finished';
+            }
+            if (chosen === null) {
+                // 攻撃リソース不足時は安全な操作にフォールバック
+                if (bestAdd && tryExec('足し算', h => { const {i,j,res}=bestAdd; return [...h.filter((_,k)=>k!==i&&k!==j), res]; })) {
+                    currentData.log = (currentData.log||'') + `➕ CPU: 足し算 → [${bestAdd.res}]\n`;
+                } else {
+                    currentData.log = (currentData.log||'') + `💤 CPU: パス\n`;
+                }
             } else if (chosen === 'add') {
                 const {i,j,res} = bestAdd;
-                logToScreen(`➕ CPU: 足し算 [${cpuHand[i]}+${cpuHand[j]}=${res}]`);
-                cpuHand = cpuHand.filter((_,k)=>k!==i&&k!==j); cpuHand.push(res);
-                currentData.log = (currentData.log||'') + `➕ CPU: 足し算 → [${res}]\n`;
+                if (tryExec('足し算', h => [...h.filter((_,k)=>k!==i&&k!==j), res])) {
+                    logToScreen(`➕ CPU: 足し算 [${res}]`);
+                    currentData.log = (currentData.log||'') + `➕ CPU: 足し算 → [${res}]\n`;
+                }
             } else if (chosen === 'sub') {
                 const {i,j,res} = bestSub;
-                logToScreen(`➖ CPU: 引き算 [${cpuHand[i]}-${cpuHand[j]}=${res}]`);
-                cpuHand = cpuHand.filter((_,k)=>k!==i&&k!==j); cpuHand.push(res);
-                currentData.log = (currentData.log||'') + `➖ CPU: 引き算 → [${res}]\n`;
+                if (tryExec('引き算', h => [...h.filter((_,k)=>k!==i&&k!==j), res])) {
+                    logToScreen(`➖ CPU: 引き算 [${res}]`);
+                    currentData.log = (currentData.log||'') + `➖ CPU: 引き算 → [${res}]\n`;
+                }
             } else if (chosen === 'dp') {
                 const {i,j,res} = bestDp;
-                logToScreen(`🧩 CPU: 商×余 [${cpuHand[i]}÷${cpuHand[j]}=${res}]`);
-                cpuHand = cpuHand.filter((_,k)=>k!==i&&k!==j); cpuHand.push(res);
-                currentData.log = (currentData.log||'') + `🧩 CPU: 商×余 → [${res}]\n`;
+                if (tryExec('商×余', h => [...h.filter((_,k)=>k!==i&&k!==j), res])) {
+                    logToScreen(`🧩 CPU: 商×余 [${res}]`);
+                    currentData.log = (currentData.log||'') + `🧩 CPU: 商×余 → [${res}]\n`;
+                }
             } else if (chosen === 'dsd') {
                 const {idx,num,q,r} = bestDsd;
-                logToScreen(`🔢 CPU: 桁和分裂 [${num}→${q}${r>0?'+'+r:''}]`);
-                cpuHand.splice(idx, 1); cpuHand.push(q); if (r > 0) cpuHand.push(r);
-                currentData.log = (currentData.log||'') + `🔢 CPU: 桁和分裂 [${num}] → [${q}]${r>0?` と [${r}]`:''}\n`;
+                if (tryExec('桁和分裂', h => { const nh=[...h]; nh.splice(idx,1); nh.push(q); if(r>0)nh.push(r); return nh; })) {
+                    logToScreen(`🔢 CPU: 桁和分裂 [${num}→${q}]`);
+                    currentData.log = (currentData.log||'') + `🔢 CPU: 桁和分裂 [${num}] → [${q}]${r>0?` と [${r}]`:''}\n`;
+                }
             } else if (chosen === 'gm') {
                 const {i,j,res} = bestGm;
-                const g = cpuGcd(cpuHand[i], cpuHand[j]);
-                logToScreen(`🔮 CPU: GCD掛け [${cpuHand[i]}×GCD(${cpuHand[i]},${cpuHand[j]})=${res}]`);
-                cpuHand = cpuHand.filter((_,k)=>k!==i&&k!==j); cpuHand.push(res);
-                currentData.log = (currentData.log||'') + `🔮 CPU: GCD掛け → [${res}]\n`;
-            } else {
+                if (tryExec('GCD掛け', h => [...h.filter((_,k)=>k!==i&&k!==j), res])) {
+                    logToScreen(`🔮 CPU: GCD掛け [${res}]`);
+                    currentData.log = (currentData.log||'') + `🔮 CPU: GCD掛け → [${res}]\n`;
+                }
+            } else if (chosen !== 'attack') {
                 logToScreen(`💤 CPU: パス`);
                 currentData.log = (currentData.log||'') + `💤 CPU: パス\n`;
             }

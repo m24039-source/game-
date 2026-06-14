@@ -203,7 +203,9 @@
                 winScore: parseInt(document.getElementById('cfg-win-score').value) || 100,
                 maxTurns: parseInt(document.getElementById('cfg-max-turns').value) || 10,
                 totalTimeStock: parseInt(document.getElementById('cfg-total-time-stock').value) || 5,
-                turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30
+                turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30,
+                resourceInitial: parseFloat(document.getElementById('cfg-resource-initial').value),
+                resourceLogBase: parseFloat(document.getElementById('cfg-resource-log-base').value) || 2,
             };
             let p1Hand = [], p2Hand = [];
             for(let i = 0; i < config.initHandCount; i++) {
@@ -216,8 +218,8 @@
                 turnOrder: ['P1', 'P2'], currentTurnIdx: 0, remainingTime: config.turnLimitTime, timerMode: "stock",
                 log: "部屋作成完了。ゲームスタート！\n", config: config, isAIGame: true,
                 players: {
-                    P1: { name: "プレイヤー 1", score: 0, hand: p1Hand, timeStock: config.totalTimeStock * 60 },
-                    P2: { name: "CPU AI 🤖", score: 0, hand: p2Hand, timeStock: config.totalTimeStock * 60 }
+                    P1: { name: "プレイヤー 1", score: 0, hand: p1Hand, timeStock: config.totalTimeStock * 60, resource: config.resourceInitial },
+                    P2: { name: "CPU AI 🤖", score: 0, hand: p2Hand, timeStock: config.totalTimeStock * 60, resource: config.resourceInitial }
                 }
             };
             try {
@@ -237,7 +239,9 @@
                 winScore: parseInt(document.getElementById('cfg-win-score').value) || 100,
                 maxTurns: parseInt(document.getElementById('cfg-max-turns').value) || 10,
                 totalTimeStock: parseInt(document.getElementById('cfg-total-time-stock').value) || 5,
-                turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30
+                turnLimitTime: parseInt(document.getElementById('cfg-turn-limit-time').value) || 30,
+                resourceInitial: parseFloat(document.getElementById('cfg-resource-initial').value),
+                resourceLogBase: parseFloat(document.getElementById('cfg-resource-log-base').value) || 2,
             };
             const initialData = {
                 status: 'waiting', maxPlayers: 2, turnCount: 1, absoluteTurnIdx: 0,
@@ -267,7 +271,7 @@
                 let randomHand = [];
                 for(let i = 0; i < rule.initHandCount; i++) randomHand.push(Math.floor(Math.random() * rule.initMaxNum) + 1);
                 
-                currentData.players[newId] = { name: `プレイヤー ${currentCount + 1}`, score: 0, hand: randomHand, timeStock: (rule.totalTimeStock || 5) * 60 };
+                currentData.players[newId] = { name: `プレイヤー ${currentCount + 1}`, score: 0, hand: randomHand, timeStock: (rule.totalTimeStock || 5) * 60, resource: isNaN(rule.resourceInitial) ? undefined : rule.resourceInitial };
                 currentData.turnOrder.push(newId);
                 
                 if (Object.keys(currentData.players).length == currentData.maxPlayers) currentData.status = 'playing';
@@ -315,7 +319,11 @@
                     const p = gameState.players[pid]; if(!p) return;
                     const div = document.createElement('div');
                     div.className = "player-status" + (pid === activePlayerId && gameState.status === 'playing' ? ' active-turn' : '') + (pid === myPlayerId ? ' my-status' : '');
-                    div.innerHTML = `<div class="player-header"><div>👤 ${p.name}</div><div class="score-display">${p.score} pt</div></div><div class="mini-card-container">${targetHandArray(p.hand).map(n => `<div class="mini-card">${n}</div>`).join('')}</div>`;
+                    const resInitial = gameState.config?.resourceInitial;
+                    const resHtml = (p.resource !== undefined && !isNaN(resInitial))
+                        ? `<div style="font-size:11px;color:#7c3aed;margin:2px 0;">🔋 リソース: ${(p.resource||0).toFixed(2)} / ${resInitial}</div>`
+                        : '';
+                    div.innerHTML = `<div class="player-header"><div>👤 ${p.name}</div><div class="score-display">${p.score} pt</div></div>${resHtml}<div class="mini-card-container">${targetHandArray(p.hand).map(n => `<div class="mini-card">${n}</div>`).join('')}</div>`;
                     board.appendChild(div);
                 });
             }
@@ -339,22 +347,51 @@
             const logArea = document.getElementById('log-area'); if(logArea) { logArea.innerText = gameState.log || ""; logArea.scrollTop = logArea.scrollHeight; }
         }
 
+        // リソースチェック＆更新: 操作可能なら true を返しリソースを更新、不可なら false
+        function checkAndApplyResource(currentData, pid, handBefore, handAfter) {
+            const cfg = currentData.config;
+            if (isNaN(cfg.resourceInitial) || cfg.resourceInitial === undefined) return true;
+            const sumBefore = handBefore.reduce((s,n)=>s+n, 0);
+            const sumAfter  = handAfter.reduce((s,n)=>s+n, 0);
+            const diff = sumAfter - sumBefore;
+            if (diff === 0) return true;
+            const base = Math.max(isNaN(cfg.resourceLogBase) ? 2 : cfg.resourceLogBase, 1.001);
+            const sign = diff > 0 ? 1 : -1;
+            const delta = sign * Math.log(Math.abs(diff) + 1) / Math.log(base);
+            const resource = currentData.players[pid].resource ?? cfg.resourceInitial;
+            if (resource + delta < 0) return false;
+            currentData.players[pid].resource = resource + delta;
+            return true;
+        }
+
+        function resourceLabel(currentData, pid) {
+            const cfg = currentData.config;
+            if (isNaN(cfg.resourceInitial) || cfg.resourceInitial === undefined) return '';
+            return ` 🔋${(currentData.players[pid].resource ?? 0).toFixed(2)}`;
+        }
+
         window.executeAttack = function() {
             if (selectedIndices.length !== 1) return alert('カードを1枚選んでください');
             runTransaction(roomRef, (currentData) => {
                 let myHand = targetHandArray(currentData.players[myPlayerId].hand);
+                const handBefore = [...myHand];
                 let attackNum = myHand[selectedIndices[0]]; if(attackNum===1) return currentData;
+                const newHand = myHand.filter((_,i) => i !== selectedIndices[0]);
+                if (!checkAndApplyResource(currentData, myPlayerId, handBefore, newHand)) {
+                    currentData.log = (currentData.log||'') + `⚠️ ${currentData.players[myPlayerId].name}: リソース不足で攻撃できません\n`;
+                    return currentData;
+                }
                 let gained = 0;
                 Object.keys(currentData.players).forEach(pid => {
                     if (pid === myPlayerId) return;
                     let th = targetHandArray(currentData.players[pid].hand);
                     currentData.players[pid].hand = th.filter(n => { if(n%attackNum===0){ gained+=n; return false;} return true; });
                 });
-                myHand.splice(selectedIndices[0], 1); currentData.players[myPlayerId].hand = myHand;
+                currentData.players[myPlayerId].hand = newHand;
                 currentData.players[myPlayerId].score += gained;
-                currentData.log = (currentData.log||'') + `⚔️ ${currentData.players[myPlayerId].name} が [${attackNum}] で攻撃！ ${gained}点獲得\n`;
+                currentData.log = (currentData.log||'') + `⚔️ ${currentData.players[myPlayerId].name} が [${attackNum}] で攻撃！ ${gained}点獲得${resourceLabel(currentData, myPlayerId)}\n`;
                 if(currentData.players[myPlayerId].score >= currentData.config.winScore) currentData.status = 'finished';
-                return currentData; // advanceTurnしない
+                return currentData;
             }).then(() => { selectedIndices = []; updateDOM(); });
         };
 
@@ -389,10 +426,15 @@
             if(!checkNumberLimit(res)) return;
             runTransaction(roomRef, (currentData) => {
                 let h = targetHandArray(currentData.players[myPlayerId].hand);
-                h = h.filter((_,i) => i!==selectedIndices[0] && i!==selectedIndices[1]);
-                h.push(res); currentData.players[myPlayerId].hand = h;
-                currentData.log = (currentData.log||'') + `🔮 ${currentData.players[myPlayerId].name}: ${n1} と ${n2} → [${res}] (${label})\n`;
-                return currentData; // advanceTurnしない
+                const handBefore = [...h];
+                const newH = [...h.filter((_,i) => i!==selectedIndices[0] && i!==selectedIndices[1]), res];
+                if (!checkAndApplyResource(currentData, myPlayerId, handBefore, newH)) {
+                    currentData.log = (currentData.log||'') + `⚠️ ${currentData.players[myPlayerId].name}: リソース不足で${label}できません\n`;
+                    return currentData;
+                }
+                currentData.players[myPlayerId].hand = newH;
+                currentData.log = (currentData.log||'') + `🔮 ${currentData.players[myPlayerId].name}: ${n1} と ${n2} → [${res}] (${label})${resourceLabel(currentData, myPlayerId)}\n`;
+                return currentData;
             }).then(() => { selectedIndices = []; updateDOM(); });
         }
 
@@ -417,12 +459,18 @@
             if(!checkNumberLimit(q)) return;
             runTransaction(roomRef, (currentData) => {
                 let h = targetHandArray(currentData.players[myPlayerId].hand);
-                h.splice(selectedIndices[0], 1);
-                h.push(q);
-                if(r > 0) h.push(r);
-                currentData.players[myPlayerId].hand = h;
-                currentData.log = (currentData.log||'') + `🔢 ${currentData.players[myPlayerId].name}: [${num}] → [${q}]${r>0?` と [${r}]`:''}  (桁和分裂)\n`;
-                return currentData; // advanceTurnしない
+                const handBefore = [...h];
+                const newH = [...h];
+                newH.splice(selectedIndices[0], 1);
+                newH.push(q);
+                if(r > 0) newH.push(r);
+                if (!checkAndApplyResource(currentData, myPlayerId, handBefore, newH)) {
+                    currentData.log = (currentData.log||'') + `⚠️ ${currentData.players[myPlayerId].name}: リソース不足で桁和分裂できません\n`;
+                    return currentData;
+                }
+                currentData.players[myPlayerId].hand = newH;
+                currentData.log = (currentData.log||'') + `🔢 ${currentData.players[myPlayerId].name}: [${num}] → [${q}]${r>0?` と [${r}]`:''}  (桁和分裂)${resourceLabel(currentData, myPlayerId)}\n`;
+                return currentData;
             }).then(() => { selectedIndices = []; updateDOM(); });
         };
 
@@ -439,11 +487,18 @@
             if(!checkNumberLimit(res)) return;
             runTransaction(roomRef, (currentData) => {
                 let h = targetHandArray(currentData.players[myPlayerId].hand);
-                const i1 = h.indexOf(X); if(i1!==-1) h.splice(i1,1);
-                const i2 = h.indexOf(Y); if(i2!==-1) h.splice(i2,1);
-                h.push(res); currentData.players[myPlayerId].hand = h;
-                currentData.log = (currentData.log||'') + `🔮 ${currentData.players[myPlayerId].name}: [${X}]×[${Y}]のGCD(${gcd})→ [${res}] (GCD掛け算)\n`;
-                return currentData; // advanceTurnしない
+                const handBefore = [...h];
+                const newH = [...h];
+                const i1 = newH.indexOf(X); if(i1!==-1) newH.splice(i1,1);
+                const i2 = newH.indexOf(Y); if(i2!==-1) newH.splice(i2,1);
+                newH.push(res);
+                if (!checkAndApplyResource(currentData, myPlayerId, handBefore, newH)) {
+                    currentData.log = (currentData.log||'') + `⚠️ ${currentData.players[myPlayerId].name}: リソース不足でGCD掛け算できません\n`;
+                    return currentData;
+                }
+                currentData.players[myPlayerId].hand = newH;
+                currentData.log = (currentData.log||'') + `🔮 ${currentData.players[myPlayerId].name}: [${X}]×[${Y}]のGCD(${gcd})→ [${res}] (GCD掛け算)${resourceLabel(currentData, myPlayerId)}\n`;
+                return currentData;
             }).then(() => { selectedIndices = []; updateDOM(); });
         };
 
@@ -474,6 +529,14 @@
             <div class="setting-item"><label>手札数値上限値</label><input type="number" id="cfg-hand-limit-num" value="150"></div>
             <div class="setting-item"><label>目標勝利ポイント</label><input type="number" id="cfg-win-score" value="100"></div>
             <div class="setting-item"><label>最大ターン数</label><input type="number" id="cfg-max-turns" value="10"></div>
+            <div class="setting-item" style="background:#f5f3ff; border-radius:4px; padding:4px;">
+                <label style="color:#7c3aed; font-weight:bold;">🔋 初期リソース値</label>
+                <input type="number" id="cfg-resource-initial" value="10" step="0.5" min="0">
+            </div>
+            <div class="setting-item" style="background:#f5f3ff; border-radius:4px; padding:4px;">
+                <label style="color:#7c3aed; font-weight:bold;">📊 リソース対数の底 a</label>
+                <input type="number" id="cfg-resource-log-base" value="2" step="0.1" min="1.1">
+            </div>
             <div class="setting-item" style="background:#eff6ff; border-radius:4px; padding:4px;">
                 <label style="color:#1d4ed8; font-weight:bold;">⏳ 持ち時間（分）</label>
                 <input type="number" id="cfg-total-time-stock" value="5" min="1" max="60">
