@@ -81,11 +81,18 @@ async function loadAIBrain() {
     } catch (error) {
         logToScreen(`⚠️ 通常ロード失敗、擬似AI（Fallback）を起動します: ${error.message}`, true);
         try {
-            const fallbackModel = tf.sequential();
-            fallbackModel.add(tf.layers.dense({units: 64, activation: 'relu', inputShape: [30]}));
-            fallbackModel.add(tf.layers.dense({units: 32, activation: 'relu'}));
-            fallbackModel.add(tf.layers.dense({units: 3, activation: 'linear'}));
-            fallbackModel.compile({optimizer: 'adam', loss: 'meanSquaredError'});
+            // フォールバック: Embedding+MaxPool構造のダミーモデル（7クラス）
+            const myIn    = tf.input({shape: [MAX_HAND], dtype: 'int32', name: 'my_hand'});
+            const enmIn   = tf.input({shape: [MAX_HAND], dtype: 'int32', name: 'enemy_hand'});
+            const scIn    = tf.input({shape: [5],        name: 'scalars'});
+            const emb     = tf.layers.embedding({inputDim: 151, outputDim: 16, maskZero: true, name: 'card_emb'});
+            const myPool  = tf.layers.globalMaxPooling1d({name: 'my_pool'}).apply(emb.apply(myIn));
+            const enmPool = tf.layers.globalMaxPooling1d({name: 'enemy_pool'}).apply(emb.apply(enmIn));
+            const concat  = tf.layers.concatenate({name: 'combined'}).apply([myPool, enmPool, scIn]);
+            const d1      = tf.layers.dense({units: 64, activation: 'relu'}).apply(concat);
+            const out     = tf.layers.dense({units: 7, activation: 'softmax', name: 'action'}).apply(d1);
+            const fallbackModel = tf.model({inputs: [myIn, enmIn, scIn], outputs: out});
+            fallbackModel.compile({optimizer: 'adam', loss: 'categoricalCrossentropy'});
             aiModel = fallbackModel;
             logToScreen("🎯 擬似AIの起動に成功。ゲームプレイは可能です。");
             isAIBrainLoading = false;
@@ -97,31 +104,37 @@ async function loadAIBrain() {
     }
 }
 
+const MAX_HAND = 20;
+
 /**
- * 📊 2. 状態ベクトル変換
+ * 📊 2. モデル入力変換（Embedding対応・可変手札対応）
  */
-function convertStateToVector(currentData, cpuId) {
-    const vector = new Array(30).fill(0.0);
-    if (!currentData || !currentData.players) return vector;
+function convertStateToInputs(currentData, cpuId) {
+    if (!currentData || !currentData.players) return null;
+    const myPlayer  = currentData.players[cpuId] || {};
+    const myHand    = Array.isArray(myPlayer.hand) ? myPlayer.hand : Object.values(myPlayer.hand || {});
+    const enemyId   = Object.keys(currentData.players).find(p => p !== cpuId);
+    const enemyHand = enemyId
+        ? (Array.isArray(currentData.players[enemyId].hand)
+            ? currentData.players[enemyId].hand
+            : Object.values(currentData.players[enemyId].hand || {}))
+        : [];
 
-    const myPlayer = currentData.players[cpuId] || {};
-    const myHand = myPlayer.hand || [];
-    for (let i = 0; i < Math.min(myHand.length, 10); i++) {
-        vector[i] = myHand[i] / 150.0;
-    }
-    vector[10] = (myPlayer.score || 0) / 100.0;
+    // 0パディング（最大MAX_HAND枚、0=空きスロット）
+    const pad = (arr) => {
+        const sliced = arr.slice(0, MAX_HAND);
+        return [...sliced, ...new Array(MAX_HAND - sliced.length).fill(0)];
+    };
 
-    const enemyId = Object.keys(currentData.players).find(pid => pid !== cpuId);
-    if (enemyId) {
-        const enemyPlayer = currentData.players[enemyId];
-        const enemyHand = enemyPlayer.hand || [];
-        for (let i = 0; i < Math.min(enemyHand.length, 10); i++) {
-            vector[11 + i] = enemyHand[i] / 150.0;
-        }
-        vector[21] = (enemyPlayer.score || 0) / 100.0;
-    }
-    vector[22] = (currentData.turnCount || 1) / 10.0;
-    return vector;
+    const scalars = [
+        (myPlayer.score || 0) / 100.0,
+        (enemyId ? (currentData.players[enemyId].score || 0) : 0) / 100.0,
+        (currentData.turnCount || 1) / 10.0,
+        myHand.length  / MAX_HAND,
+        enemyHand.length / MAX_HAND,
+    ];
+
+    return { myPad: pad(myHand), enemyPad: pad(enemyHand), scalars };
 }
 
 /**
@@ -254,14 +267,21 @@ async function executeCPUTurn(roomRef, cpuId, runTransaction, cachedGameState) {
         let actionCategory = 0;
         if (aiModel && cachedGameState) {
             try {
-                const stateVector = convertStateToVector(cachedGameState, cpuId);
-                const inputTensor = tf.tensor2d([stateVector], [1, 30]);
-                const prediction = aiModel.predict(inputTensor);
-                const predictionData = await prediction.data();
-                actionCategory = predictionData.indexOf(Math.max(...predictionData));
-                inputTensor.dispose();
-                prediction.dispose();
-                logToScreen(`🧠 AI推論完了: カテゴリ [${actionCategory}] を選択。`);
+                const inputs = convertStateToInputs(cachedGameState, cpuId);
+                if (inputs) {
+                    const myTensor    = tf.tensor2d([inputs.myPad],    [1, MAX_HAND], 'int32');
+                    const enemyTensor = tf.tensor2d([inputs.enemyPad], [1, MAX_HAND], 'int32');
+                    const scTensor    = tf.tensor2d([inputs.scalars],  [1, 5]);
+                    const prediction  = aiModel.predict({
+                        'my_hand':    myTensor,
+                        'enemy_hand': enemyTensor,
+                        'scalars':    scTensor,
+                    });
+                    const predictionData = await prediction.data();
+                    actionCategory = predictionData.indexOf(Math.max(...predictionData));
+                    myTensor.dispose(); enemyTensor.dispose(); scTensor.dispose(); prediction.dispose();
+                    logToScreen(`🧠 AI推論完了: カテゴリ [${actionCategory}] を選択。`);
+                }
             } catch (e) {
                 logToScreen(`⚠️ 推論エラー、パスします: ${e.message}`, true);
             }
