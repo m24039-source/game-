@@ -237,7 +237,7 @@ async function thinkCpuTurn(currentGameData, cpuId) {
  * ✅ グローバル関数：executeCPUTurn
  * 🔧 修正: グローバル関数として定義
  */
-async function executeCPUTurn(roomRef, cpuId, runTransaction) {
+async function executeCPUTurn(roomRef, cpuId, runTransaction, cachedGameState) {
     if (cpuTurnInProgress) {
         logToScreen(`⏸️ スキップ: CPU既に思考中`);
         return;
@@ -246,25 +246,106 @@ async function executeCPUTurn(roomRef, cpuId, runTransaction) {
     try {
         logToScreen(`🚀 executeCPUTurn 開始: ${cpuId}`);
 
-        await runTransaction(roomRef, async (currentData) => {
+        // Step1: トランザクションの外でAI推論（非同期処理はここで完結させる）
+        if (!aiModel) {
+            logToScreen("🤖 AIが未ロードのため急ぎロードします...");
+            await loadAIBrain();
+        }
+        let actionCategory = 0;
+        if (aiModel && cachedGameState) {
+            try {
+                const stateVector = convertStateToVector(cachedGameState, cpuId);
+                const inputTensor = tf.tensor2d([stateVector], [1, 30]);
+                const prediction = aiModel.predict(inputTensor);
+                const predictionData = await prediction.data();
+                actionCategory = predictionData.indexOf(Math.max(...predictionData));
+                inputTensor.dispose();
+                prediction.dispose();
+                logToScreen(`🧠 AI推論完了: カテゴリ [${actionCategory}] を選択。`);
+            } catch (e) {
+                logToScreen(`⚠️ 推論エラー、パスします: ${e.message}`, true);
+            }
+        }
+
+        // Step2: 同期トランザクションでゲーム状態を更新
+        await runTransaction(roomRef, (currentData) => {
             if (!currentData || currentData.status !== 'playing') return currentData;
 
-            // 自分のターンかチェック
             const activeId = currentData.turnOrder[currentData.currentTurnIdx];
             if (activeId !== cpuId) {
                 logToScreen(`⏸️ ${cpuId}のターンではないためスキップ`);
                 return currentData;
             }
 
-            const updatedData = await thinkCpuTurn(currentData, cpuId);
+            const cpuPlayer = currentData.players[cpuId];
+            if (!cpuPlayer) return currentData;
 
-            updatedData.currentTurnIdx = (updatedData.currentTurnIdx + 1) % updatedData.turnOrder.length;
-            updatedData.absoluteTurnIdx++;
-            if (updatedData.currentTurnIdx === 0) {
-                updatedData.turnCount++;
+            let cpuHand = [...(Array.isArray(cpuPlayer.hand) ? cpuPlayer.hand : Object.values(cpuPlayer.hand || {}))];
+            const limit = currentData.config?.handLimitNum || 150;
+            const isFirstRound = (currentData.turnCount === 1);
+            let bestAction = { type: 'pass', score: -1, cardIdx: -1, card1Idx: -1, card2Idx: -1, resVal: -1 };
+
+            if (actionCategory === 1 && !isFirstRound) {
+                cpuHand.forEach((attackNum, i) => {
+                    if (attackNum === 1) return;
+                    let totalGained = 0;
+                    Object.keys(currentData.players).forEach(pid => {
+                        if (pid === cpuId) return;
+                        (Array.isArray(currentData.players[pid].hand) ? currentData.players[pid].hand : Object.values(currentData.players[pid].hand || {})).forEach(n => {
+                            if (n % attackNum === 0) totalGained += n;
+                        });
+                    });
+                    if (totalGained > 0 && totalGained > bestAction.score) {
+                        bestAction = { type: 'attack', score: totalGained, cardIdx: i, value: attackNum };
+                    }
+                });
             }
 
-            return updatedData;
+            if (bestAction.type === 'pass') {
+                if (cpuHand.length >= 2) {
+                    outer: for (let i = 0; i < cpuHand.length; i++) {
+                        for (let j = 0; j < cpuHand.length; j++) {
+                            if (i === j) continue;
+                            const addRes = cpuHand[i] + cpuHand[j];
+                            if (addRes <= limit) {
+                                bestAction = { type: 'op2', card1Idx: i, card2Idx: j, resVal: addRes };
+                                break outer;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (bestAction.type === 'attack') {
+                const attackNum = bestAction.value;
+                logToScreen(`⚔️ CPUアクション: 攻撃 [倍数: ${attackNum}]`);
+                Object.keys(currentData.players).forEach(pid => {
+                    if (pid === cpuId) return;
+                    const h = Array.isArray(currentData.players[pid].hand) ? currentData.players[pid].hand : Object.values(currentData.players[pid].hand || {});
+                    currentData.players[pid].hand = h.filter(n => n % attackNum !== 0);
+                });
+                cpuHand.splice(bestAction.cardIdx, 1);
+                currentData.players[cpuId].hand = cpuHand;
+                currentData.players[cpuId].score = (currentData.players[cpuId].score || 0) + bestAction.score;
+                if (currentData.players[cpuId].score >= (currentData.config?.winScore || 100)) currentData.status = 'finished';
+            } else if (bestAction.type === 'op2') {
+                logToScreen(`➕ CPUアクション: 合成 [結果: ${bestAction.resVal}]`);
+                [bestAction.card1Idx, bestAction.card2Idx].sort((a, b) => b - a).forEach(idx => cpuHand.splice(idx, 1));
+                cpuHand.push(bestAction.resVal);
+                currentData.players[cpuId].hand = cpuHand;
+            } else {
+                logToScreen(`💤 CPUアクション: パス`);
+            }
+
+            // ターン進行
+            currentData.currentTurnIdx = (currentData.currentTurnIdx + 1) % currentData.turnOrder.length;
+            currentData.absoluteTurnIdx++;
+            if (currentData.currentTurnIdx === 0) {
+                currentData.turnCount++;
+                if (currentData.turnCount > (currentData.config?.maxTurns || 10)) currentData.status = 'finished';
+            }
+
+            return currentData;
         });
 
         logToScreen(`✅ CPU${cpuId} のターン処理完了！`);

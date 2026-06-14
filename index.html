@@ -62,7 +62,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, set, onValue, update, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
         
-        import { executeCPUTurn, loadBrain } from "./cpu-ai.js?v=9";
+        import { executeCPUTurn, loadBrain } from "./cpu-ai.js?v=10";
         
         const firebaseConfig = {
             apiKey: "AIzaSyALUFUpxPoYhRSUMMEkn5whaLnbkvKYvl4",
@@ -148,7 +148,8 @@
                     const activePlayerId = gameState.turnOrder ? gameState.turnOrder[gameState.currentTurnIdx] : null;
                     if (activePlayerId && activePlayerId !== myPlayerId && myPlayerId === 'P1') {
                         // 🔧 修正: runTransaction をパラメータとして渡す
-                        setTimeout(() => { executeCPUTurn(roomRef, activePlayerId, runTransaction); }, 1000);
+                        const snapState = JSON.parse(JSON.stringify(gameState));
+                        setTimeout(() => { executeCPUTurn(roomRef, activePlayerId, runTransaction, snapState); }, 1000);
                     }
 
                     if (myPlayerId) {
