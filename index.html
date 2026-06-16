@@ -38,6 +38,8 @@
         .score-display { font-size: 18px; color: var(--success); font-weight: bold; text-align: right; }
         .mini-card-container { display: flex; flex-wrap: wrap; gap: 6px; }
         .mini-card { background: white; border: 1px solid #cbd5e1; padding: 4px 10px; border-radius: 4px; font-size: 14px; font-weight: bold; text-align: center; }
+        .mini-card.selected { background: #7c3aed; color: white; border-color: #7c3aed; }
+        .mini-card.selected .factor-label { color: #ede9fe; }
         .factor-label { font-size: 9px; font-weight: normal; color: #7c3aed; margin-top: 2px; }
         .analysis-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 10px; background: #f5f3ff; padding: 8px; border-radius: 8px; }
         .analysis-panel { background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 8px; padding: 10px; margin-bottom: 15px; font-size: 12px; }
@@ -109,7 +111,8 @@
         let gameState = {};
         let myPlayerId = null; 
         let selectedIndices = [];
-        let currentProcessedTurnIdx = -1; 
+        let previewPicks = [];
+        let currentProcessedTurnIdx = -1;
         let timerInterval = null; 
 
         window.addEventListener('DOMContentLoaded', () => {
@@ -204,12 +207,17 @@
             'cfg-resource-initial','cfg-resource-min','cfg-resource-log-base',
             'cfg-total-time-stock','cfg-turn-limit-time'
         ];
+        const CFG_CHECKBOX_IDS = ['cfg-enable-preview'];
 
         window.copySettings = function() {
             const data = {};
             CFG_FIELD_IDS.forEach(id => {
                 const el = document.getElementById(id);
                 if (el) data[id] = el.value;
+            });
+            CFG_CHECKBOX_IDS.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) data[id] = el.checked;
             });
             const text = JSON.stringify(data);
             const area = document.getElementById('cfg-clipboard-area');
@@ -236,6 +244,11 @@
                         document.getElementById(id).value = data[id];
                     }
                 });
+                CFG_CHECKBOX_IDS.forEach(id => {
+                    if (data[id] !== undefined && document.getElementById(id)) {
+                        document.getElementById(id).checked = !!data[id];
+                    }
+                });
                 alert('設定を適用しました！');
             } catch (e) {
                 alert('設定の読み込みに失敗しました。正しいJSON形式か確認してください。');
@@ -256,6 +269,7 @@
                 resourceInitial: parseFloat(document.getElementById('cfg-resource-initial').value),
                 resourceMin: parseFloat(document.getElementById('cfg-resource-min').value) || 0,
                 resourceLogBase: parseFloat(document.getElementById('cfg-resource-log-base').value) || 2,
+                enablePreview: document.getElementById('cfg-enable-preview') ? document.getElementById('cfg-enable-preview').checked : true,
             };
             let p1Hand = [], p2Hand = [];
             for(let i = 0; i < config.initHandCount; i++) {
@@ -293,6 +307,7 @@
                 resourceInitial: parseFloat(document.getElementById('cfg-resource-initial').value),
                 resourceMin: parseFloat(document.getElementById('cfg-resource-min').value) || 0,
                 resourceLogBase: parseFloat(document.getElementById('cfg-resource-log-base').value) || 2,
+                enablePreview: document.getElementById('cfg-enable-preview') ? document.getElementById('cfg-enable-preview').checked : true,
             };
             const initialData = {
                 status: 'waiting', maxPlayers: 2, turnCount: 1, absoluteTurnIdx: 0,
@@ -365,6 +380,11 @@
                 timerBox.style.color = stockSec < 60 ? '#ef4444' : '#1e293b';
             }
 
+            const previewEnabled = !gameState.config || gameState.config.enablePreview !== false;
+            const toggleRow = document.querySelector('.analysis-toggle');
+            if (toggleRow) toggleRow.style.display = previewEnabled ? 'flex' : 'none';
+            if (!previewEnabled) { analysisMode = false; previewPicks = []; }
+
             if(gameState.turnOrder && gameState.players) {
                 gameState.turnOrder.forEach(pid => {
                     const p = gameState.players[pid]; if(!p) return;
@@ -374,10 +394,17 @@
                     const resHtml = (p.resource !== undefined && !isNaN(resInitial))
                         ? `<div style="font-size:11px;color:#7c3aed;margin:2px 0;">🔋 リソース: ${(p.resource||0).toFixed(2)} / ${resInitial}</div>`
                         : '';
-                    div.innerHTML = `<div class="player-header"><div>👤 ${p.name}</div><div class="score-display">${p.score} pt</div></div>${resHtml}<div class="mini-card-container">${targetHandArray(p.hand).map(n => `<div class="mini-card">${n}${analysisMode ? `<div class="factor-label">${primeFactorStr(n)}</div>` : ''}</div>`).join('')}</div>`;
+                    const isOpponent = pid !== myPlayerId;
+                    const miniCardsHtml = targetHandArray(p.hand).map((n, idx) => {
+                        const picked = isOpponent && previewPicks.some(pk => pk.pid === pid && pk.idx === idx);
+                        const clickAttr = (analysisMode && isOpponent) ? ` onclick="togglePreviewPick('${pid}', ${idx})" style="cursor:pointer;"` : '';
+                        return `<div class="mini-card${picked ? ' selected' : ''}"${clickAttr}>${n}${analysisMode ? `<div class="factor-label">${primeFactorStr(n)}</div>` : ''}</div>`;
+                    }).join('');
+                    div.innerHTML = `<div class="player-header"><div>👤 ${p.name}</div><div class="score-display">${p.score} pt</div></div>${resHtml}<div class="mini-card-container">${miniCardsHtml}</div>`;
                     board.appendChild(div);
                 });
             }
+            updatePreviewAnalysisPanel();
 
             const resultBanner = document.getElementById('game-result-banner');
             if (gameState.status === 'finished') {
@@ -420,6 +447,18 @@
         let analysisMode = false;
         window.toggleAnalysisMode = function() {
             analysisMode = document.getElementById('analysis-toggle-cb').checked;
+            if (!analysisMode) previewPicks = [];
+            updateDOM();
+        };
+
+        window.togglePreviewPick = function(pid, idx) {
+            const existingIdx = previewPicks.findIndex(pk => pk.pid === pid && pk.idx === idx);
+            if (existingIdx !== -1) {
+                previewPicks.splice(existingIdx, 1);
+            } else {
+                if (previewPicks.length >= 2) previewPicks.shift();
+                previewPicks.push({ pid, idx });
+            }
             updateDOM();
         };
 
@@ -478,6 +517,46 @@
         }
 
         function primeFactorLabel(n) { return ` = ${primeFactorStr(n)}`; }
+
+        function updatePreviewAnalysisPanel() {
+            const panel = document.getElementById('preview-analysis-panel');
+            if (!panel) return;
+            if (!analysisMode || previewPicks.length === 0 || !gameState.players) { panel.style.display = 'none'; return; }
+            const nums = previewPicks.map(pk => {
+                const p = gameState.players[pk.pid];
+                const hand = targetHandArray(p ? p.hand : []);
+                return { name: p ? p.name : pk.pid, n: hand[pk.idx] };
+            }).filter(x => x.n !== undefined);
+            if (nums.length === 0) { panel.style.display = 'none'; return; }
+
+            const rows = [`<div class="row" style="font-weight:bold;">👀 相手カードの演算プレビュー</div>`];
+            nums.forEach(x => rows.push(`<div class="row">${x.name}: <b>${x.n}</b> = ${primeFactorStr(x.n)}</div>`));
+
+            if (nums.length === 1) {
+                const a = nums[0].n;
+                const ds = digitSumNum(a);
+                if (ds > 0) {
+                    const q = Math.floor(a / ds), r = a % ds;
+                    rows.push(`<div class="row">🔢 桁和で分裂 (桁和${ds}): 商${q}${primeFactorLabel(q)} ＋ 余${r}${r ? primeFactorLabel(r) : ''}</div>`);
+                }
+            } else if (nums.length === 2) {
+                const a = nums[0].n, b = nums[1].n;
+                const sum = a + b;
+                rows.push(`<div class="row">➕ 足し算: ${a}+${b} = ${sum}${primeFactorLabel(sum)}</div>`);
+                const sub1 = a - b, sub2 = b - a;
+                const subVal = sub1 > 0 ? sub1 : sub2;
+                rows.push(`<div class="row">➖ 引き算: |${a}-${b}| = ${subVal}${subVal > 0 ? primeFactorLabel(subVal) : ''}</div>`);
+                if (b !== 0) {
+                    const dp = Math.floor(a / b) * (a % b);
+                    rows.push(`<div class="row">🧩 商×余: (${a}÷${b}の商×余) = ${dp}${dp ? primeFactorLabel(dp) : ''}</div>`);
+                }
+                const g = gcdNum(a, b);
+                const gm = a * g;
+                rows.push(`<div class="row">🔮 最大公約数を掛ける: GCD(${a},${b})=${g} → ${a}×${g} = ${gm}${g > 1 ? primeFactorLabel(gm) : ''}</div>`);
+            }
+            panel.innerHTML = rows.join('');
+            panel.style.display = 'block';
+        }
 
         // リソースチェック＆更新: 操作可能なら true を返しリソースを更新、不可なら false
         function checkAndApplyResource(currentData, pid, handBefore, handAfter) {
@@ -709,6 +788,10 @@
                 <label style="color:#b91c1c; font-weight:bold;">🔔 秒読み（秒）</label>
                 <input type="number" id="cfg-turn-limit-time" value="30" min="5" max="300">
             </div>
+            <div class="setting-item" style="background:#f5f3ff; border-radius:4px; padding:4px;">
+                <label style="color:#7c3aed; font-weight:bold;">🔬 素因数分解・演算プレビュー機能</label>
+                <input type="checkbox" id="cfg-enable-preview" checked style="width:auto;">
+            </div>
         </div>
         <div style="margin-top:10px; padding:8px; background:#f0fdf4; border-radius:8px;">
             <div style="display:flex; gap:8px; margin-bottom:6px;">
@@ -742,8 +825,9 @@
             <div id="timer-byoyomi-label" class="timer-byoyomi-label">🔔 秒 読 み</div>
             <div id="timer-box" class="timer-count">--</div>
         </div>
-        <div class="analysis-toggle"><label><input type="checkbox" id="analysis-toggle-cb" onchange="toggleAnalysisMode()"> 🔬 素因数分解・演算プレビュー モード</label></div>
+        <div class="analysis-toggle"><label><input type="checkbox" id="analysis-toggle-cb" onchange="toggleAnalysisMode()"> 🔬 素因数分解・演算プレビュー モード（相手の手札もクリックで選択可）</label></div>
         <div class="section-title">全プレイヤーの状況</div><div class="pvp-board" id="pvp-board"></div>
+        <div id="preview-analysis-panel" class="analysis-panel" style="display:none;"></div>
         <div id="turn-info" style="text-align: center; font-weight: bold; margin-bottom: 15px;"></div>
         <div class="section-title">あなたの手札</div><div class="hand-container" id="hand-area"></div>
         <div id="analysis-panel" class="analysis-panel" style="display:none;"></div>
