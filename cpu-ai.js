@@ -343,7 +343,7 @@ async function executeCPUTurn(roomRef, cpuId, runTransaction, cachedGameState) {
 
             let cpuHand = [...(Array.isArray(cpuPlayer.hand) ? cpuPlayer.hand : Object.values(cpuPlayer.hand || {}))];
             const limit = currentData.config?.handLimitNum || 150;
-            const isFirstRound = (currentData.turnCount === 1);
+            const isFirstRound = (currentData.turnCount === 1 && cpuId === 'P1');
 
             // ─── ヘルパー関数（同期） ───
             const cpuGcd = (a, b) => { while(b){let t=b;b=a%b;a=t;} return a; };

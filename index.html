@@ -164,6 +164,8 @@
                             currentProcessedTurnIdx = gameState.absoluteTurnIdx; 
                             if (gameState.absoluteTurnIdx === 0) {
                                 runTransaction(roomRef, (c) => { if (c) c.log = (c.log || "") + `🏁 ゲームスタート！\n`; return c; });
+                            } else if (gameState.turnCount === 1) {
+                                // 1ターン目はP1・P2ともドローなし
                             } else {
                                 triggerStartTurnDraw();
                             }
@@ -424,6 +426,8 @@
             }
 
             document.querySelectorAll('.actions-grid button').forEach(btn => { btn.disabled = !isMyTurn; });
+            const attackBtn = document.querySelector('.btn-attack');
+            if (attackBtn && isMyTurn && gameState.turnCount === 1 && myPlayerId === 'P1') attackBtn.disabled = true;
             const myHandArr = gameState.players && gameState.players[myPlayerId] ? targetHandArray(gameState.players[myPlayerId].hand) : [];
             const handArea = document.getElementById('hand-area');
             if(handArea) {
@@ -585,6 +589,7 @@
 
         window.executeAttack = function() {
             if (selectedIndices.length !== 1) return alert('カードを1枚選んでください');
+            if (gameState.turnCount === 1 && myPlayerId === 'P1') return alert('P1は最初のターンは攻撃できません');
             runTransaction(roomRef, (currentData) => {
                 let myHand = targetHandArray(currentData.players[myPlayerId].hand);
                 const handBefore = [...myHand];
