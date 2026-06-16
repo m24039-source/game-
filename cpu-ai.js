@@ -151,7 +151,8 @@ function convertStateToInputs(currentData, cpuId) {
 
     // 0パディング（最大MAX_HAND枚、0=空きスロット）
     const pad = (arr) => {
-        const sliced = arr.slice(0, MAX_HAND);
+        const sorted = [...arr].sort((a, b) => b - a);
+        const sliced = sorted.slice(0, MAX_HAND);
         return [...sliced, ...new Array(MAX_HAND - sliced.length).fill(0)];
     };
 

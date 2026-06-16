@@ -37,10 +37,15 @@
         .player-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; margin-bottom: 8px; }
         .score-display { font-size: 18px; color: var(--success); font-weight: bold; text-align: right; }
         .mini-card-container { display: flex; flex-wrap: wrap; gap: 6px; }
-        .mini-card { background: white; border: 1px solid #cbd5e1; padding: 4px 10px; border-radius: 4px; font-size: 14px; font-weight: bold; }
+        .mini-card { background: white; border: 1px solid #cbd5e1; padding: 4px 10px; border-radius: 4px; font-size: 14px; font-weight: bold; text-align: center; }
+        .factor-label { font-size: 9px; font-weight: normal; color: #7c3aed; margin-top: 2px; }
+        .analysis-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 10px; background: #f5f3ff; padding: 8px; border-radius: 8px; }
+        .analysis-panel { background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 8px; padding: 10px; margin-bottom: 15px; font-size: 12px; }
+        .analysis-panel .row { margin-bottom: 4px; }
+        .analysis-panel .row.invalid { color: #b91c1c; text-decoration: line-through; opacity: 0.7; }
         .section-title { font-size: 13px; font-weight: bold; color: #64748b; margin-bottom: 8px; border-left: 4px solid var(--primary); padding-left: 8px; }
         .hand-container { display: flex; flex-wrap: wrap; gap: 8px; min-height: 60px; background: #eff6ff; border: 2px dashed #bfdbfe; border-radius: 12px; padding: 10px; margin-bottom: 15px; align-items: flex-start; }
-        .card { background: white; border: 2px solid var(--primary); color: var(--primary); padding: 8px 14px; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; user-select: none; transition: all 0.2s; }
+        .card { background: white; border: 2px solid var(--primary); color: var(--primary); padding: 8px 14px; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; user-select: none; transition: all 0.2s; display: flex; flex-direction: column; align-items: center; }
         .card:hover { transform: scale(1.05); }
         .card.selected { background: var(--primary); color: white; box-shadow: 0 0 10px rgba(37,99,235,0.4); }
         
@@ -193,6 +198,50 @@
 
         function stopHostTimer() { if (timerInterval) { clearInterval(timerInterval); timerInterval = null; } }
 
+        const CFG_FIELD_IDS = [
+            'cfg-init-hand-count','cfg-init-max-num','cfg-draw-count','cfg-draw-max-num',
+            'cfg-hand-limit-num','cfg-win-score','cfg-max-turns',
+            'cfg-resource-initial','cfg-resource-min','cfg-resource-log-base',
+            'cfg-total-time-stock','cfg-turn-limit-time'
+        ];
+
+        window.copySettings = function() {
+            const data = {};
+            CFG_FIELD_IDS.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) data[id] = el.value;
+            });
+            const text = JSON.stringify(data);
+            const area = document.getElementById('cfg-clipboard-area');
+            if (area) area.value = text;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(() => {
+                    alert('設定をコピーしました！');
+                }).catch(() => {
+                    alert('クリップボードへのコピーに失敗しました。下のテキストエリアから手動でコピーしてください。');
+                });
+            } else {
+                alert('下のテキストエリアに設定を表示しました。手動でコピーしてください。');
+            }
+        };
+
+        window.applySettings = function() {
+            const area = document.getElementById('cfg-clipboard-area');
+            const text = (area ? area.value : '').trim();
+            if (!text) { alert('テキストエリアに設定JSONを貼り付けてください。'); return; }
+            try {
+                const data = JSON.parse(text);
+                CFG_FIELD_IDS.forEach(id => {
+                    if (data[id] !== undefined && document.getElementById(id)) {
+                        document.getElementById(id).value = data[id];
+                    }
+                });
+                alert('設定を適用しました！');
+            } catch (e) {
+                alert('設定の読み込みに失敗しました。正しいJSON形式か確認してください。');
+            }
+        };
+
         window.createRoom = async function(maxPlayers) {
             const config = {
                 initHandCount: parseInt(document.getElementById('cfg-init-hand-count').value) || 5,
@@ -325,9 +374,26 @@
                     const resHtml = (p.resource !== undefined && !isNaN(resInitial))
                         ? `<div style="font-size:11px;color:#7c3aed;margin:2px 0;">🔋 リソース: ${(p.resource||0).toFixed(2)} / ${resInitial}</div>`
                         : '';
-                    div.innerHTML = `<div class="player-header"><div>👤 ${p.name}</div><div class="score-display">${p.score} pt</div></div>${resHtml}<div class="mini-card-container">${targetHandArray(p.hand).map(n => `<div class="mini-card">${n}</div>`).join('')}</div>`;
+                    div.innerHTML = `<div class="player-header"><div>👤 ${p.name}</div><div class="score-display">${p.score} pt</div></div>${resHtml}<div class="mini-card-container">${targetHandArray(p.hand).map(n => `<div class="mini-card">${n}${analysisMode ? `<div class="factor-label">${primeFactorStr(n)}</div>` : ''}</div>`).join('')}</div>`;
                     board.appendChild(div);
                 });
+            }
+
+            const resultBanner = document.getElementById('game-result-banner');
+            if (gameState.status === 'finished') {
+                if (resultBanner) resultBanner.style.display = 'block';
+                const resultText = document.getElementById('game-result-text');
+                if (resultText && gameState.players) {
+                    const ranked = Object.values(gameState.players).slice().sort((a,b) => (b.score||0) - (a.score||0));
+                    const top = ranked[0];
+                    const myScore = gameState.players[myPlayerId] ? gameState.players[myPlayerId].score : null;
+                    const iWon = top && gameState.players[myPlayerId] === top;
+                    resultText.innerText = top
+                        ? `🏆 ${top.name} の勝利！（${top.score}pt）` + (myScore !== null ? `　あなた: ${myScore}pt ${iWon ? '🎉' : ''}` : '')
+                        : '対戦終了';
+                }
+            } else if (resultBanner) {
+                resultBanner.style.display = 'none';
             }
 
             document.querySelectorAll('.actions-grid button').forEach(btn => { btn.disabled = !isMyTurn; });
@@ -337,7 +403,8 @@
                 handArea.innerHTML = '';
                 myHandArr.forEach((num, index) => {
                     const div = document.createElement('div');
-                    div.className = 'card' + (selectedIndices.includes(index) ? ' selected' : ''); div.innerText = num;
+                    div.className = 'card' + (selectedIndices.includes(index) ? ' selected' : '');
+                    div.innerHTML = String(num) + (analysisMode ? `<div class="factor-label">${primeFactorStr(num)}</div>` : '');
                     div.onclick = () => {
                         if (!isMyTurn) return;
                         selectedIndices = selectedIndices.includes(index) ? selectedIndices.filter(i => i !== index) : [...selectedIndices, index];
@@ -346,8 +413,71 @@
                     handArea.appendChild(div);
                 });
             }
+            updateAnalysisPanel(myHandArr);
             const logArea = document.getElementById('log-area'); if(logArea) { logArea.innerText = gameState.log || ""; logArea.scrollTop = logArea.scrollHeight; }
         }
+
+        let analysisMode = false;
+        window.toggleAnalysisMode = function() {
+            analysisMode = document.getElementById('analysis-toggle-cb').checked;
+            updateDOM();
+        };
+
+        function primeFactorStr(n) {
+            if (n <= 1) return String(n);
+            let x = n; const parts = [];
+            for (let p = 2; p * p <= x; p++) {
+                let c = 0;
+                while (x % p === 0) { x /= p; c++; }
+                if (c > 0) parts.push(c > 1 ? `${p}<sup>${c}</sup>` : `${p}`);
+            }
+            if (x > 1) parts.push(String(x));
+            return parts.length ? parts.join('×') : String(n);
+        }
+
+        function gcdNum(a, b) { while (b) { [a, b] = [b, a % b]; } return a; }
+        function digitSumNum(n) { return String(n).split('').reduce((s, d) => s + Number(d), 0); }
+
+        function updateAnalysisPanel(myHandArr) {
+            const panel = document.getElementById('analysis-panel');
+            if (!panel) return;
+            if (!analysisMode || selectedIndices.length === 0) { panel.style.display = 'none'; return; }
+            const lim = gameState.config ? gameState.config.handLimitNum : Infinity;
+            const rows = [];
+            if (selectedIndices.length === 1) {
+                const a = myHandArr[selectedIndices[0]];
+                const ds = digitSumNum(a);
+                rows.push(`<div class="row">選択中: <b>${a}</b> = ${primeFactorStr(a)}</div>`);
+                if (ds === 0) {
+                    rows.push(`<div class="row invalid">🔢 桁和で分裂: 桁の和が0のため不可</div>`);
+                } else {
+                    const q = Math.floor(a / ds), r = a % ds;
+                    const noop = q === a;
+                    rows.push(`<div class="row${noop ? ' invalid' : ''}">🔢 桁和で分裂 (桁和${ds}): 商${q}${primeFactorLabel(q)} ＋ 余${r}${r ? primeFactorLabel(r) : ''}${noop ? '（変化なし・不可）' : ''}</div>`);
+                }
+            } else if (selectedIndices.length === 2) {
+                const a = myHandArr[selectedIndices[0]], b = myHandArr[selectedIndices[1]];
+                rows.push(`<div class="row">選択中: <b>${a}</b> = ${primeFactorStr(a)}　/　<b>${b}</b> = ${primeFactorStr(b)}</div>`);
+                const sum = a + b;
+                rows.push(`<div class="row${sum > lim ? ' invalid' : ''}">➕ 足し算: ${a}+${b} = ${sum}${primeFactorLabel(sum)}${sum > lim ? '（上限超え・不可）' : ''}</div>`);
+                const sub1 = a - b, sub2 = b - a;
+                const subVal = sub1 > 0 ? sub1 : sub2;
+                rows.push(`<div class="row${subVal <= 0 ? ' invalid' : ''}">➖ 引き算: |${a}-${b}| = ${subVal}${subVal > 0 ? primeFactorLabel(subVal) : ''}${subVal <= 0 ? '（0以下・不可）' : ''}</div>`);
+                if (b !== 0) {
+                    const dp = Math.floor(a / b) * (a % b);
+                    rows.push(`<div class="row${!(dp > 0 && dp <= lim) ? ' invalid' : ''}">🧩 商×余: (${a}÷${b}の商×余) = ${dp}${dp > 0 ? primeFactorLabel(dp) : ''}${!(dp > 0 && dp <= lim) ? '（不可）' : ''}</div>`);
+                }
+                const g = gcdNum(a, b);
+                const gm = a * g;
+                rows.push(`<div class="row${!(g > 1 && gm <= lim) ? ' invalid' : ''}">🔮 最大公約数を掛ける: GCD(${a},${b})=${g} → ${a}×${g} = ${gm}${(g > 1) ? primeFactorLabel(gm) : ''}${!(g > 1 && gm <= lim) ? '（不可）' : ''}</div>`);
+            } else {
+                rows.push(`<div class="row">3枚以上選択中（演算は1〜2枚で実行されます）</div>`);
+            }
+            panel.innerHTML = rows.join('');
+            panel.style.display = 'block';
+        }
+
+        function primeFactorLabel(n) { return ` = ${primeFactorStr(n)}`; }
 
         // リソースチェック＆更新: 操作可能なら true を返しリソースを更新、不可なら false
         function checkAndApplyResource(currentData, pid, handBefore, handAfter) {
@@ -507,6 +637,32 @@
         };
 
         window.resetRoom = function() { set(roomRef, null); location.reload(); };
+
+        window.rematch = function() {
+            runTransaction(roomRef, (currentData) => {
+                if (!currentData || currentData.status !== 'finished') return currentData;
+                const cfg = currentData.config;
+                const turnOrder = currentData.turnOrder || Object.keys(currentData.players);
+                turnOrder.forEach(pid => {
+                    const p = currentData.players[pid];
+                    if (!p) return;
+                    const hand = [];
+                    for (let i = 0; i < cfg.initHandCount; i++) hand.push(Math.floor(Math.random() * cfg.initMaxNum) + 1);
+                    p.hand = hand;
+                    p.score = 0;
+                    p.timeStock = cfg.totalTimeStock * 60;
+                    p.resource = cfg.resourceInitial;
+                });
+                currentData.status = 'playing';
+                currentData.turnCount = 1;
+                currentData.absoluteTurnIdx = 0;
+                currentData.currentTurnIdx = 0;
+                currentData.remainingTime = cfg.turnLimitTime;
+                currentData.timerMode = 'stock';
+                currentData.log = '🔄 次の対戦を開始！\n';
+                return currentData;
+            }).then(() => { selectedIndices = []; updateDOM(); });
+        };
     </script>
 </head>
 <body>
@@ -554,6 +710,13 @@
                 <input type="number" id="cfg-turn-limit-time" value="30" min="5" max="300">
             </div>
         </div>
+        <div style="margin-top:10px; padding:8px; background:#f0fdf4; border-radius:8px;">
+            <div style="display:flex; gap:8px; margin-bottom:6px;">
+                <button onclick="copySettings()" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; border:none; cursor:pointer;">📋 設定をコピー</button>
+                <button onclick="applySettings()" style="background:#0891b2; color:white; padding:6px 12px; border-radius:6px; border:none; cursor:pointer;">📥 設定を適用</button>
+            </div>
+            <textarea id="cfg-clipboard-area" placeholder="ここに設定JSONを貼り付けて「設定を適用」を押してください" style="width:100%; height:50px; font-size:0.8rem; font-family:monospace; box-sizing:border-box;"></textarea>
+        </div>
         <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:8px;">
             <button style="background:#2563eb; color:white; padding:10px 18px; border-radius:8px; font-size:1rem;" onclick="createRoom(2)">🤖 AI対戦を開始</button>
             <button style="background:#16a34a; color:white; padding:10px 18px; border-radius:8px; font-size:1rem;" onclick="createOnlineRoom()">🌐 オンライン対戦部屋を作成</button>
@@ -569,15 +732,21 @@
 
     <div id="game-screen" style="display: none;">
         <div id="rules-summary-box" class="rules-summary">ルール適用中</div>
+        <div id="game-result-banner" style="display:none; text-align:center; background:#fef3c7; border:2px solid #f59e0b; border-radius:8px; padding:14px; margin-bottom:12px;">
+            <div id="game-result-text" style="font-size:1.1rem; font-weight:bold; margin-bottom:8px;"></div>
+            <button onclick="rematch()" style="background:#f59e0b; color:white; padding:10px 18px; border-radius:8px; font-size:1rem; border:none; cursor:pointer;">🔄 次の対戦をする</button>
+        </div>
         <div class="timer-panel">
             <div id="timer-player-name" class="timer-title">⏳ タイマー</div>
             <div class="timer-stock-row">⏱ 持ち時間: <span id="timer-stock-val">--</span></div>
             <div id="timer-byoyomi-label" class="timer-byoyomi-label">🔔 秒 読 み</div>
             <div id="timer-box" class="timer-count">--</div>
         </div>
+        <div class="analysis-toggle"><label><input type="checkbox" id="analysis-toggle-cb" onchange="toggleAnalysisMode()"> 🔬 素因数分解・演算プレビュー モード</label></div>
         <div class="section-title">全プレイヤーの状況</div><div class="pvp-board" id="pvp-board"></div>
         <div id="turn-info" style="text-align: center; font-weight: bold; margin-bottom: 15px;"></div>
         <div class="section-title">あなたの手札</div><div class="hand-container" id="hand-area"></div>
+        <div id="analysis-panel" class="analysis-panel" style="display:none;"></div>
         <div class="section-title">コマンド</div>
         <div class="actions-grid">
             <button class="btn-attack" onclick="executeAttack()">⚔️ 約数強奪攻撃</button>
